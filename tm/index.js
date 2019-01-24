@@ -554,8 +554,8 @@ function toCN(str) {
 	var row, re=new RegExp
 	for(var i in term) {
 		row=term[i]
-		re.compile(row[1],'g')
-		str = str.replace(re,row[0]||'')
+		// re.compile(row[1],'g')
+		str = str.replace(row[1], row[0]||'')
 	}
 	return str||'';
 }
@@ -568,8 +568,8 @@ function toTW(str) {
 	var row,re=new RegExp
 	for(var i in term) {
 		row=term[i]
-		re.compile(row[0],'g')
-		str = str.replace(re,row[1]||'')
+		// re.compile(row[0],'g')
+		str = str.replace(row[0],row[1]||'')
 	}
 	return str||'';
 }
