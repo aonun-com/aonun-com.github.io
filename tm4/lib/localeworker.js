@@ -87,8 +87,14 @@ class LocaleWorker {
 		cacheWorkers[this.name]=this.worker=createLocaleWorker(this.mainHandles,this.workerHandles);
 	}
 
-	send(){
-		this.worker.postMessage(Array.from(arguments));
+	send(...a){
+		try{
+			this.worker.postMessage(a);
+		}catch(e)  {
+			console.log('worker异常关闭，纠正了错误！')
+			this.connect()
+			this.worker.postMessage(a);
+		}
 	}
 
 	set autoReconnect(b){

@@ -1,6 +1,6 @@
 function google(v,t,f){
 	return $.ajax({
-			url:'http://tm3.aonun.com/net/google/',
+			url:'https://cihot.com/googles/',
 			dataType:'json',
 			data: {
 				q:v,
@@ -14,7 +14,7 @@ function google(v,t,f){
 }
 function naver(v,t,f){
 	return $.ajax({
-			url:'http://tm3.aonun.com/net/naver/',
+		url:'https://cihot.com/naver/',
 			dataType:'json',
 			data: {
 				q:v,
@@ -28,7 +28,7 @@ function naver(v,t,f){
 }
 function daum(v,t,f){
 	return $.ajax({
-			url:'http://tm3.aonun.com/net/daum/',
+		url:'https://cihot.com/daum/',
 			dataType:'json',
 			data: {
 				q:v,
