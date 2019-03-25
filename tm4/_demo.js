@@ -135,28 +135,31 @@ function tagDropFile(tag,callback){
 
 
 //-------------------------------------------------------------------------
-function createUniqueKey(len) {
-    var s = [];
-    var char = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-    var len  = char.length;
-    var time = Date.now().toString(36);
+function createUniqueKey(size=36,datePrefix=true) {
+    let s = [];
+    let chars = createUniqueKey.chars;
+    let len  = chars.length;
+    let time = Date.now().toString(36);
 
-    for (var i = 0; i < 36; i++) {
-        s[i] = char.substr(Math.floor(Math.random() * len), 1);
+    for (let i = 0; i < size; i++) {
+        s[i] = chars.substr(Math.floor(Math.random() * len), 1);
     }
-    var uk = s.join('');
-    return time+'_'+uk;
+	let uk = s.join('');
+	
+	return datePrefix ? Date.now().toString(36)+uk : uk;
 }
+createUniqueKey.chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 
 
 
 //---------------------------------------------------------------------------
-function count() {
-    return ++count.current;
+function* count(start=0,step=1){
+	while(true){
+		yield start;
+		start+=step;
+	}
 }
-count.current=-1;
-
 
 //----------------------------------------------------------------------------
 function replaceIndataToArray(indata){

@@ -12,7 +12,7 @@ o=require('./term.js');
 
 // 读取文件
 const fs=require('fs');
-var dirname = 'E:/Downloads/';
+var dirname = 'D:/Downloads/';
 var filenames = fs.readdirSync(dirname);
 
 filenames =filenames.filter(function(filename){
