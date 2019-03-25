@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+	<meta name="Description" content="test socket.io">
+	<meta name="viewport" content="width=device-width">
+	<script src="/lib/socket.io.js"></script>
+	<script src="/lib/vue.min.js"></script>
+	<title>room</title>
+	<style>
+		label { display: grid; grid-template-columns:auto 1fr; }
+	</style>
+</head>
+
+<body>
+	<div id="app">
+		<button @click="toggleConnect">{{connected?'断开':'连接'}}</button>
+		<label>room: <input v-model="room" type="search" autocomplete></label>
+		<button @click="join">join</button>
+		<button @click="leave">leave</button>
+		<button @click="sendMessage">sendMessage</button>
+		<button @click="sendSocketMessage">sendSocketMessage</button>
+		<button @click="sendSocketsMessage">sendSocketsMessage</button>
+		<br>
+		<label>command:<input v-model="cmd" type="search" @keydown="sendCommand" autocomplete></label>
+		<table>
+			<tr v-for="m in messages">
+				<td>{{m[0]}}</td>
+				<td>{{m.slice(1)}}</td>
+			</tr>
+		</table>
+	</div>
+	<noscript>Your browser does not support JavaScript!</noscript>
+	<script>
+		let path, opt, msg, s, vue;
+		opt = {
+			transports: ['websocket'],
+			path,
+			reconnection: false,
+		};
+		s = io('/', opt);
+		s.on('message', (...m)=>console.log('message',...m));
+		s.on('join', function (room) {
+			console.log('join', room);
+			vue.messages.unshift([s.id, 'join', room]);
+		});
+		s.on('leave', function (room) {
+			console.log('leave', room);
+			vue.messages.unshift([s.id, 'leave', room]);
+		});
+		s.on('roommessage', (id, ...message) => {
+			console.log(id, ...message);
+			vue.messages.unshift([s.id, 'roommessage', ...message]);
+		});
+		s.on('socketmessage', (id, ...message) => {
+			console.log(id, ...message);
+			vue.messages.unshift([s.id, 'socketmessage', ...message]);
+		});
+		s.on('socketsmessage', (id, ...message) => {
+			console.log(id, ...message);
+			vue.messages.unshift([s.id, 'socketsmessage', ...message]);
+		});
+		vue = new Vue({
+			el: '#app',
+			data: {
+				room: 'deafult',
+				s,
+				count: 0,
+				messages: [],
+				cmd:'',
+			},
+			computed: {
+				connected() {
+					return this.s.connected;
+				}
+			},
+			methods: {
+				toggleConnect() {
+					// 客户端可以随时 open() 或 close()
+					this.connected ? s.close() : s.open();
+				},
+				join() {
+					s.emit('join', this.room);
+				},
+				leave() {
+					s.emit('leave', this.room);
+				},
+				sendMessage() {
+					s.emit('roommessage', this.room, Date.now());
+				},
+				sendSocketMessage() {
+					s.emit('socketmessage', this.room, Date.now());
+				},
+				sendSocketsMessage() {
+					s.emit('socketsmessage', this.room, Date.now());
+				},
+				sendCommand(){
+					if(event.keyCode===13) s.emit('cmd', this.cmd);
+				}
+			}
+		});
+	</script>
+</body>
+
+</html>
