@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+	<link rel="stylesheet" href="cssd.css">
+	<style>
+		.container div {
+			border: 1px solid #333;
+			width: 100%;
+			height: 600px;
+		}
+
+		@keyframes downmove {
+			from {
+				top: 0px;
+			}
+
+			to {
+				top: 200px;
+			}
+		}
+
+		.downmove {
+			position: relative;
+			animation: downmove 3s infinite;
+			width: 50px;
+			height: 50px;
+			background: red;
+			text-overflow: ellipsis;
+		}
+	</style>
+</head>
+
+<body>
+
+	<div class="container">
+		<div>1</div>
+		<div>2</div>
+		<div>3</div>
+		<div>4</div>
+	</div>
+	<div id="a">
+		<div class=""></div>
+		<div>downmove</div>
+	</div>
+
+</body>
+
+<!-- <script src="cssd.js"></script> -->
+<script>
+	let { log, warn, info, dir, trace, group, groupEnd } = console
+
+	function rules() {
+		for (let cssStyleSheet of document.styleSheets) {
+			// log(cssStyleSheet.rules === cssStyleSheet.cssRules)// 相等
+			for (let rule of cssStyleSheet.cssRules) {
+				// rule 有好几种。CSSStyleRule、
+				if (rule instanceof CSSStyleRule) {
+					/* CSSStyleRule
+					 cssText
+					 parentRule
+					 parentStyleSheet
+					 selectorText
+					 style:
+					 	cssFloat
+						cssText
+						getPropertyPriority
+						getPropertyValue
+						item
+						length
+						removeProperty
+						setProperty
+						parentRule: CSSStyleRule
+						
+					 styleMap:
+						 size
+						 append
+						 set
+						 delete
+						 clear
+						 entries
+						 forEach
+						 get
+						 getAll
+						 has
+						 keys
+						 values
+					 type: 1
+					 */
+					!function () {
+						group(rule.selectorText)
+
+						log(rule.style.cssText) // 样式
+						// warn(rule.cssText)// 选择器{样式}
+
+						// 不推荐使用，重复细分内容会更多更复杂。
+						// rule.styleMap.forEach((cssKeywordValues, name, stylePropertyMap) => {
+						// 	let value = cssKeywordValues.toString()
+						// 	if(value !== 'initial') log(name, value)
+						// })
+
+						!function () {
+							group('styleMap')
+							for (let e of rule.styleMap) {
+								let [name, cssKeywordValues] = e
+								let value = cssKeywordValues.toString()
+								if (value !== 'initial') {
+									log(name, value)
+								}
+							}
+							groupEnd('styleMap')
+						}
+
+						// 同上
+						// {
+						// 	group('style')
+						// 	for (let i = 0; i < rule.style.length; i++) {
+						// 		let name = rule.style.item(i)
+						// 		let value = rule.style.getPropertyValue(name)
+						// 		if (value !== 'initial') {
+						// 			log(name, value)
+						// 		}
+						// 	}
+						// 	groupEnd('style')
+						// }
+
+						groupEnd(rule.selectorText)
+					}()
+
+				} else if (rule instanceof CSSKeyframesRule) {
+					/* CSSKeyframesRule
+						cssRules
+						cssText
+						name
+						parentRule
+						parentStyleSheet
+						type: 7
+					*/
+					!function () {
+						group(rule.name)
+						log(rule.cssText)// 全部内容
+						{
+							group('cssRules')
+							for (let cssKeyframesRule of rule.cssRules) {
+								log(cssKeyframesRule.cssText)// 下面的 keyText{style.cssText}
+
+								// log(cssKeyframesRule.keyText)
+								// log(cssKeyframesRule.style.cssText)// 下面的name:value
+
+								// for(let name of cssKeyframesRule.style){
+								// 	// CSSStyleDeclaration
+								// 	let value = cssKeyframesRule.style[name]
+								// 	if(value==='200px') cssKeyframesRule.style[name] = '100px'
+								// 	log(name, cssKeyframesRule.style[name])
+								// }
+							}
+							groupEnd('cssRules')
+						}
+						groupEnd(rule.name)
+					}()
+				} else {
+					/* type
+						CSSMediaRule
+						conditionText
+						cssRules
+						cssText
+						media
+						type: 4
+					*/
+					warn(rule)
+				}
+			}
+		}
+		return result
+	}
+
+
+	/* 获取所有cssRule
+	
+	首先、遍历 document.styleSheets下的 cssStyleSheet。
+	再遍历 cssStyleSheet 的 rule。
+	
+	提供可选的 filter and map 中间件，可获得中间件处理后的结果集。
+	*/
+	function getCssRules(filter) {
+		let result = []
+		for (let cssStyleSheet of document.styleSheets) {
+			// log(cssStyleSheet.rules === cssStyleSheet.cssRules)// 相等
+			for (let rule of cssStyleSheet.cssRules) {
+				// 过滤搜集 filter
+				if (typeof filter === 'function') {
+					let v = filter(rule)
+					if (v) result.push(v)
+				} else {
+					result.push(rule)
+				}
+			}
+		}
+		return result
+	}
+
+
+	// log(getCssRules((rule)=>{
+	// 	let k, v
+	// 	if(rule instanceof CSSStyleRule) {
+	// 		k = rule.selectorText,
+	// 		v = rule.style.cssText
+	// 		return { [k]: v }
+	// 	} else if(rule instanceof CSSKeyframesRule) {
+	// 		return rule.cssText
+	// 	}else{
+	// 		return rule.cssText
+	// 	}
+	// }))
+
+
+	function getCssdElement() {
+		const TITLE = 'cssd-element'
+		
+		let cssdElement = document.querySelector(`style[title="${TITLE}"]`)
+		if (!cssdElement) {
+			cssdElement = document.createElement('style')
+			document.body.insertAdjacentElement('afterEnd', cssdElement)
+			cssdElement.title = TITLE
+		}
+		
+		return cssdElement
+	}
+	
+	
+	/* 将文档中的css内容合并为一个标签 <style title="cssd-element">
+	
+	*/
+	for (let cssStyleSheet of document.styleSheets) {
+			let node = cssStyleSheet.ownerNode
+			if (node.title === title) {
+				cssdElement = node
+			}else if(removeOther) {
+				if(cssdElement)
+			}
+		}
+	function cssdMerge() {
+		documentReadyStateCompletePromise(() => {
+			for (let cssStyleSheet of document.styleSheets) {
+				let node = cssStyleSheet.ownerNode
+				// log(cssStyleSheet.rules === cssStyleSheet.cssRules)// 相等
+				for (let rule of cssStyleSheet.cssRules) {
+					// 过滤搜集 filter
+					if (typeof filter === 'function') {
+						let v = filter(rule)
+						if (v) result.push(v)
+					} else {
+						result.push(rule)
+					}
+				}
+			}
+			// rule的cssText
+			let cssText = getCssRules((rule) => rule.cssText).join('\n')
+			let cssdElement = getCssdElement()
+			if (cssdElement.textContent !== cssText) cssdElement.textContent = cssText
+		})
+	}
+
+
+	/* 文档准备完毕后执行。
+	
+	承诺在满足 document.readyState === 'complete' 的条件下执行回调函数 fn。
+	返回值为 promise ，所以可以使用 .then 函数执行回调函数。
+
+	例：
+	documentReadyStateCompletePromise(warn).then(log)
+	文档准备完毕后，首先输出warn，后输出log。
+	*/
+	function documentReadyStateCompletePromise(fn) {
+		let promise = new Promise((resolve, reject) => {
+			const COMPLETE = 'complete'
+			function listenDocumentComplete(e) {
+				if (document.readyState === COMPLETE) {
+					resolve(document.readyState)
+					document.removeEventListener('readystatechange', listenDocumentComplete)
+				}
+			}
+			if (document.readyState !== COMPLETE) {
+				document.addEventListener('readystatechange', listenDocumentComplete)
+			} else {
+				resolve(document.readyState)
+			}
+		})
+		if (typeof fn === 'function') {
+			return promise.then(fn)
+		}
+		return promise;
+	}
+
+
+	/* 尾部添加 <style> 标签
+		selectorText
+		cssText
+	*/
+	function appendStyle(selectorText, cssText) {
+		let element = document.createElement('style')
+		getCssdElement().appendChild(element)
+		element.textContent = `${selectorText} {${cssText}}`
+	}
+
+
+
+
+	cssdMerge()
+
+
+
+
+
+	// 其他领域
+	// document.activeElement
+	// document.scrollingElement
+	// ononline = onoffline = function (e) {
+	// 	console.log(e.type, e)
+	// }
+
+</script>
+
+</html>
