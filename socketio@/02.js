@@ -6,7 +6,7 @@ opt = {
 	reconnection: true,
 };
 
-s = io(opt);
+s = io('cihot.com',opt);
 
 s.on('message', (data) => {
 	showMsg(data)
