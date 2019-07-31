@@ -222,7 +222,7 @@
 	user-modify: read-write-plaintext-only;
 	-webkit-user-modify: read-write-plaintext-only;
 }
-#ao-hiddenclip {
+textarea#ao-hiddenclip {
 	width: 10px;
 	height: 10px;
 	position: fixed;
