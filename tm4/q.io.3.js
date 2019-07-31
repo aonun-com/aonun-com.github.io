@@ -307,12 +307,13 @@
 				$(e).text(texts[i]);
 			});
 		})
+		c.find('buttom[name="copyST"]').on('click', ()=>{
+			let o = document.querySelector('#ao-hiddenclip')
+			o.value = stringifyST(MemoQ.res)
+			o.select()
+			if(!document.execCommand('copy')) alert('Unable to copy')
+		})
 	}
-	c.find('buttom[name="copyST"]').on('click', ()=>{
-		let o = document.querySelector('#ao-hiddenclip')
-		o.value = stringifyST(MemoQ.res)
-		if(!document.execCommand('copy')) alert('Unable to copy')
-	})
 
 	View.prototype.from = function (rows) {
 		// rows: {locked, id, source, source2, tag, target, target2 }
