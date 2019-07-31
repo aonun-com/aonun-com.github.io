@@ -214,20 +214,20 @@
 	text-shadow: 3px 3px 3px #ccc;
 }
 #ao-mask button {
-	width:4em;
-	height:2em;
-	background: #5f6;
+	width: auto!important;
+	height: auto!important;
+	background: #5c6;
 }
 #ao-mask #ao-edit .target {
 	user-modify: read-write-plaintext-only;
 	-webkit-user-modify: read-write-plaintext-only;
 }
 textarea#ao-hiddenclip {
-	width: 10px;
-	height: 10px;
-	position: fixed;
-	top: -100px;
-	left: -100px;
+	width: 10px!important;
+	height: 10px!important;
+	position: fixed!important;
+	top: -100px!important;
+	left: -100px!important;
 }
 </style>
 <table>
