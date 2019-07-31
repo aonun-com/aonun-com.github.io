@@ -311,6 +311,7 @@ textarea#ao-hiddenclip {
 			let o = document.querySelector('#ao-hiddenclip')
 			o.value = stringifyST(MemoQ.res)
 			o.select()
+			o.focus()
 			if(!document.execCommand('copy')) alert('Unable to copy')
 		})
 	}
