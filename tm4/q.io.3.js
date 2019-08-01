@@ -307,12 +307,14 @@ textarea#ao-hiddenclip {
 				$(e).text(texts[i]);
 			});
 		})
-		c.find('buttom[name="copyST"]').on('click', ()=>{
+		c.find('button[name="copyST"]').on('click', ()=>{
+			let v = stringifyST(MemoQ.res)
 			let o = document.querySelector('#ao-hiddenclip')
-			o.value = stringifyST(MemoQ.res)
-			o.select()
+			o.value = v
 			o.focus()
+			o.select()
 			if(!document.execCommand('copy')) alert('Unable to copy')
+			console.log(v)
 		})
 	}
 
