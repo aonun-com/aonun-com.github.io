@@ -1,5 +1,5 @@
 importScripts('/lib/localforage.min.js');
-importScripts('/lib/similarText.min.js');
+importScripts('/lib/similar_text.min.js');
 
 addEventListener('message', function (e) {
 	router(e.data);

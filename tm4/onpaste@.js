@@ -1,4 +1,4 @@
-侦听粘贴操作
+// 侦听粘贴操作
 window.addEventListener('paste', function (e) {
 	let cd = e.clipboardData
 	console.warn(cd.getData('text/html').substr(0, 50), '...')

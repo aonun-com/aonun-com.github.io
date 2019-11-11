@@ -1,14 +1,16 @@
 .icons {
-width: 18px;
-height: 18px;
-background-image: url(icons.png);
-display: inline-block;
-user-select: none;
-cursor: pointer;
-margin:0;
-padding:0;
-border:none;
-outline:none;
+	width: 18px;
+	height: 18px;
+	background-image: url(icons.png);
+	background-color: transparent;
+	display: inline-block;
+	user-select: none;
+	cursor: pointer;
+	margin:0;
+	padding:0;
+	border:none;
+	outline:none;
+	text-indent: 2em;
 }
 .icons_download { background-position: 0px 0px; }
 .icons_dashboard { background-position: -18px 0px; }

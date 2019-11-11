@@ -1,78 +1,133 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<script src="/lib/jquery.js"></script>
-<script src="ao.js"></script>
-<title>paste</title>
-<style type="text/css">
-* {font-family:Verdana,"Microsoft Yahei",NSimSun,Tahoma!important;}
-th {background:#000;color:#fff;text-align:left;}
-td {border:1px solid #ccc!important;vertical-align: top!important; }
-#preview {
-	position:fixed;top:10px; right:0;
-	background:#fff;color:#000;
-	border: 2px solid #0c0;
-}
-</style>
+	<script src="/lib/jquery.js"></script>
+	<script src="ao.js"></script>
+	<title>paste</title>
+	<style type="text/css">
+		* {
+			font-family: Verdana, "Microsoft Yahei", NSimSun, Tahoma !important;
+			font-size: 7pt;
+		}
+
+		th {
+			background: #000;
+			color: #fff;
+			text-align: left;
+		}
+
+		td {
+			border: 1px solid #ccc !important;
+			vertical-align: top !important;
+		}
+
+		#preview {
+			position: fixed;
+			top: 10px;
+			right: 0;
+			background: #fff;
+			color: #000;
+			border: 2px solid #0c0;
+		}
+	</style>
 </head>
+
 <body>
-<table>
-<tr><th colspan="2">text/plain</th></tr>
-<tr><td id="textplainView"></td><td><pre id="textplain"></pre></td></tr>
-<tr><th colspan="2">text/html</th></tr>
-<tr><td id="texthtmlView"></td><td><pre id="texthtml"></pre></td></tr>
-</table>
+	<table>
+		<tr>
+			<th colspan="2">text/plain</th>
+		</tr>
+		<tr>
+			<td id="textplainView"></td>
+			<td>
+				<pre id="textplain"></pre>
+			</td>
+		</tr>
+		<tr>
+			<th colspan="2">text/html</th>
+		</tr>
+		<tr>
+			<td id="texthtmlView"></td>
+			<td>
+				<pre id="texthtml"></pre>
+			</td>
+		</tr>
+		<tr>
+			<th>uriList</th>
+			<td id="uriList"></td>
+		</tr>
+		<tr>
+			<th>files</th>
+			<td id="files"></td>
+		</tr>
+		<tr>
+			<th>items</th>
+			<td id="items"></td>
+		</tr>
+	</table>
 </body>
+
 </html>
 <script>
-$(document).on('paste','body', function(e){
-	let cd=e.originalEvent.clipboardData;
+	let { debug } = console
 
-	let plain=cd.getData('text/plain')
-	let html=cd.getData('text/html')
+	$(document).on('paste', 'body', function (e) {
+		let cd = e.originalEvent.clipboardData;
 
-	$('#textplain').text(plain)
-	$('#textplainView').html(ao.stringToTable(plain)).find('td').attr('contenteditable',true)
-	
-	$('#texthtml').text(html)
-	$('#texthtmlView').html(html).find('td').attr('contenteditable',true)
-})
+		let imageURLs = new Map()
+		function getURL(file) {
+			let url
+			return imageURLs.get(file) || imageURLs.set(file, url=URL.createObjectURL(file)) && url
+		}
+		function createImage(file) {
+			let img = document.createElement('img')
+			img.src = getURL(file)
+			return img
+		}
 
+		let plain = cd.getData('text/plain')
+		let html = cd.getData('text/html')
+		let uriList = cd.getData('text/uri-list')
 
-$(document).bind('keydown','td', function(e){
-	setTimeout(()=>{
-		let s
-		s=getGameText(e.target)
-		s=previewCode(s)
-		console.log(s)
-		// 预览
-		if(e.target.nodeName!=='TD') return ;
-		preview(s)
+		$('#textplain').text(plain)
+		$('#textplainView').html(ao.stringToTable(plain)).find('td').attr('contenteditable', true)
 
+		$('#texthtml').text(html)
+		$('#texthtmlView').html(html).find('td').attr('contenteditable', true)
+
+		$('#uriList').text(uriList)
+
+		debug('plain', plain)
+		debug('html', html)
+		debug('uriList', uriList)
+
+		debug(cd.items)
+		debug(cd.files)
+
+		$('#files').empty()
+		Array.prototype.forEach.call(cd.files, function (e, i) {
+			debug(e)
+			if (/^image/.test(e.type)) {
+				$('#files').append(createImage(e))
+			}
+
+		})
+
+		Array.prototype.forEach.call(cd.items, function (e, i) {
+			// debug(e)
+			let { kind, type } = e
+			if (kind === 'string') {
+				e.getAsString((...e) => debug('**', type, ...e))
+			} else if(kind==='file') {
+				// debug(e.getAsFile(), e.getAsString(type))
+				e.getAsFile('**', type, debug)
+			}
+		})
 	})
-})
 
 
-function getGameText(td){
-	return $(td).clone().find('br').text('\n').end().text().trim()
-}
 
 
-function previewCode(s){
-	let re=/\[([A-Z0-9]{6}|[A-Z0-9]{8})\]([\s\S]+?)\[-\]/gim;
-	return s.replace(re, (_,color,text)=>{
-		console.log(_)
-		s=$('<span>').css({color:'#'+color}).text(text).get(0).outerHTML;
-		return s
-	}).replace(/\\n/g,'\n').replace(/\\t/g,'\t')
-}
 
-function preview(s){
-	let _
-	_=$('#preview')
-	if(_.length===0){
-		_=$('<pre id="preview">').appendTo('body')
-	}
-	_.html(s)
-}
 </script>

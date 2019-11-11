@@ -1,14 +1,85 @@
-let w_collector, dict
-let lwsd
-let lwsd2
-let { log, warn, info } = console
-let themaReady = [false,false]
+// let w_collector
+let tm
+let dict
+let lwsd, lwsd2
+let { log, warn, info, debug } = console
+
+// ObjectID - toString()
+function createOid() { return String(ObjectID()) }
+
+let themaReady = [false, false]
 document.body.style.display = 'none'
 
-// 纯文字全部替换
+
+// 【常用的键盘操作】
+$(document).on('keydown', '.source,.target', (e) => {
+	if (e.keyCode === 13 && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+		e.preventDefault()
+	}
+})
+$(window).on('keydown', (e) => {
+	let hk = hotkey(e.originalEvent)
+	switch (hk) {
+		case 'alt':
+		case 'f10':
+		case 'alt+right':
+		case 'alt+left':
+			e.preventDefault();
+			break;
+		case 'enter':
+			if ($(e.target).is('#works .target')) {
+				calculationWorksStatus()
+			}
+			break;
+		case 'tab':
+		case 'shift+tab':
+		case 'ctrl+s':
+			calculationWorksStatus()
+			break;
+	}
+})
+
+
+// 【设备ID】
+let oids = {}
+let oid = localStorage.getItem('oid')// 本机识别码
+if (!oid) {
+	oid = new ObjectID().str
+	localStorage.setItem('oid', oid)
+}
+let s = window.socket = io(':3000', { reconnection: true, reconnectionDelay: 30000, reconnectionDelayMax: 60000, transports: ['websocket'], query: { oid } })
+s.on('message', function (...msgs) {
+	log(...msgs)
+})
+s.on('connnect', () => {
+	console.log('[sock]', s.id)
+})
+s.on('oids', function (ids) {
+	oids = ids
+	let unique = Object.keys(ids).length
+	let count = Object.values(ids).reduce((r, e) => r + e, 0)
+
+	let tar = document.querySelector('#clientsCount')
+	if (tar) {
+		let members = Object.keys(oids).join()
+		tar.textContent = `${unique}/${count}(${members})`
+	}
+})
+s.on('cmd', function (cmd, ack) {
+	try {
+		let rs = eval(cmd)
+		ack(true, rs)
+	} catch (err) {
+		ack(false, err.message)
+	}
+})
+
+
+// 【纯文字全部替换】
 let textRE = {}
+const textSource = '^\\/[-](|)*+?!{}.$';
 textRE.marks = {
-	search: new RegExp('\\/^[-](|)*+?!{}.$'.split('').map(e => '\\' + e).join('|'), 'g'),
+	search: new RegExp(textSource.split('').map(e => '\\' + e).join('|'), 'g'),
 	replace: /\$|\&/g,
 }
 textRE.search = function search(str) {
@@ -22,27 +93,61 @@ textRE.replace = function (str, a, b) {
 Object.freeze(textRE)
 
 
+
+// 选择器
 let SM = SelectionManager = {
-	get s() { return window.getSelection() },
-	get range() { return this.s.getRangeAt(0); },
+	s: window.getSelection(),
+	// get s() {
+	// 	return window.getSelection()
+	// },
+	get range() {
+		return this.s.getRangeAt(0)
+	},
 	set range(v) {
 		if (v instanceof Range) {
-			this.s.removeAllRanges();
-			this.s.addRange(v);
+			this.s.removeAllRanges()
+			this.s.addRange(v)
 		}
 	},
-	get text() { return this.range.toString(); },
+	get text() { return this.range.toString() },
 	set text(v) {
-		this.range.deleteContents();
-		this.range.insertNode(document.createTextNode(v));
-		this.range.collapse();
-	}
+		this.range.deleteContents()
+		this.range.insertNode(document.createTextNode(v))
+		this.range.collapse()
+	},
+	insert(v, html = false) {
+		this.set(v, html)
+		this.range.collapse()
+	},
+	set(v, html = false) {
+		this.range.deleteContents()
+		if (html) {
+			let div = document.createElement('div')
+			div.innerHTML = v
+			div.childNodes.forEach(node => this.range.insertNode(node))
+		} else {
+			this.range.insertNode(document.createTextNode(v))
+		}
+	},
+	select(e) {
+		if (e instanceof Node) {
+			this.s.selectAllChildren(e)
+		} else if (e && typeof e === 'string') {
+			e = document.querySelector(e)
+			this.s.selectAllChildren(e)
+		}
+	},
+	delete() {
+		this.s.deleteFromDocument()
+		// this.range.deleteContents()
+	},
+	blur() {
+		this.s.removeAllRanges()
+	},
 };
 
 
 $(function () {
-	setTimeout(() => $('#autoSizeDictWindow').click(), 1000)
-
 	let code_similar = `(function(g){if(typeof g.ao==='undefined'){g.ao={};}var r=g.ao.similar=function similar(t,s,u){if(null===t||null===s||void 0===t||void 0===s)return 0;var n,o,e,l,f=0,i=0,b=0,c=(t+="").length,h=(s+="").length;for(n=0;n<c;n++)for(o=0;o<h;o++){for(e=0;n+e<c&&o+e<h&&t.charAt(n+e)===s.charAt(o+e);e++);e>b&&(b=e,f=n,i=o)}return(l=b)&&(f&&i&&(l+=r(t.substr(0,f),s.substr(0,i))),f+b<c&&i+b<h&&(l+=r(t.substr(f+b,c-f-b),s.substr(i+b,h-i-b)))),u?200*l/(c+h):l};})(this);`;
 	let code_Reference = `class Reference{
 	constructor(arr){if(!(arr instanceof Array)) arr=[]; this.from(arr); }
@@ -140,9 +245,10 @@ Object.defineProperties(Search, {
 `;
 
 
+	// 点击 #works .source 时，搜索词库
 	// statusDict tip
 	lwsd2 = new LocaleWorker('searchDictionary2',
-		(e) => {
+		function (e) {
 			let data = e.data, status = data[0], res;
 			if (status === 200) {
 				lwsd2.done = true;
@@ -182,10 +288,14 @@ addEventListener('message',(e)=>{
 		array.forEach(function(kv,index){
 		    // let k=kv[0], v=kv[1], _k=stringNormalize(k);
 		    let k=kv[0], v=kv[1], _k=k;
-		    let re= Search.getRegExp(_k.length>0 ? _k : k);
-		    if(re.test(source)) {
-		        res.push([k,v,index]);
-		    }
+			let re= Search.getRegExp(_k.length>0 ? _k : k);
+		    if(re) {
+				if(re.test(source)) {
+					res.push([k,v,index]);
+				}
+		    }else{
+				console.warn({k, v, _k, re})
+			}
 		});
 
 		res.sort((a,b)=>String(a[0]).length<String(b[0]).length)
@@ -200,10 +310,13 @@ addEventListener('message',(e)=>{
 	// tips
 	lwsd = new LocaleWorker('searchDictionary',
 		(e) => {
+			/* e.data
+			[ statusCode, resultArray ]
+			*/
 			let data = e.data;
-			if (data[0] === 200) {
+			if (data[0] === 200) {// statusCode
 				lwsd.done = true;
-				let a = data[1];
+				let a = data[1];// resultArray
 				let table = ao.arrayToTable(a);
 				// 显示到#tips中
 				$('td:nth-child(4)', table).addClass('index');
@@ -220,6 +333,24 @@ addEventListener('message',(e)=>{
 					$(lwsd.target).text(a[0][1])
 						.addClass('doneAuto')
 					// .css({background:$('#ctrlEnterColor').val()})
+				}
+
+				// checktm1
+				if ($('#checktm1').prop('checked') && a.length && $('.currentEditRow').length) {
+					let t = a[0]
+					if (t) {
+						let t1 = t[0];
+						let t2 = $('.currentEditRow .source').text().trim();
+						let dmp = new diff_match_patch();
+						let diff = dmp.diff_main(t1, t2)
+						dmp.diff_cleanupSemantic(diff)
+						let dmpHTML = dmp.diff_prettyHtml(diff);
+						dmpHTML = dmpHTML.replace(/style="background:#(?:e6ffe6|ffe6e6);"/g, '')
+						pushloghtml(dmpHTML);
+
+						let { x, y, height } = $('.currentEditRow .target').get(0).getBoundingClientRect();
+						showTip({ html: dmpHTML, x, y, delay: 5000, css: { transform: 'translate(0,-100%)' } });
+					}
 				}
 			}
 		}, code_similar + code_Reference + `addEventListener('message',(e)=>{
@@ -241,9 +372,9 @@ addEventListener('message',(e)=>{
 
 
 	$(window).on('beforeunload', function (e) {
-		e.preventDefault();
-		$('.qa').remove();
-		saveDatas();
+		e.preventDefault()
+		$('.qa').remove()
+		saveDatas()
 	});
 	// $(window).on('unload',function(e){
 	// 	e.preventDefault();
@@ -252,58 +383,59 @@ addEventListener('message',(e)=>{
 	// });
 
 	// 词典查找大法。长度截断渐进法。
-	function lenSearch(str, dictArray) {
-		let startTime = Date.now();
-		let timeout = false;
-		let rs = [];
-		if (!dictArray) return rs;
-		let i = 0, len = str.length, start = i, end = len, chunk, index = 0, re, b = false;
+	// function lenSearch(str, dictArray) {
+	// 	let startTime = Date.now();
+	// 	let timeout = false;
+	// 	let rs = [];
+	// 	if (!dictArray) return rs;
+	// 	let i = 0, len = str.length, start = i, end = len, chunk, index = 0, re, b = false;
 
-		while (true) {
-			if ((Date.now() - startTime) > 2000) {
-				timeout = true;
-				break;
-			}
-			if (end === start) break;
-			chunk = str.slice(start, end);
+	// 	while (true) {
+	// 		if ((Date.now() - startTime) > 2000) {
+	// 			timeout = true;
+	// 			break;
+	// 		}
+	// 		if (end === start) break;
+	// 		chunk = str.slice(start, end);
 
-			// 寻找这个内容
-			b = dictArray.some((e, i, a) => {
-				if ((Date.now() - startTime) > 2000) {
-					timeout = true;
-					return true;
-				}
-				re = new RegExp('^' + Search._getRegExp(chunk) + '$', 'gi');
-				if (re.test(e[0])) {
-					index = i;
-					start = end;
-					end = len;
-					return true;
-				}
-				return false;
-			})
+	// 		// 寻找这个内容
+	// 		b = dictArray.some((e, i, a) => {
+	// 			if ((Date.now() - startTime) > 2000) {
+	// 				timeout = true;
+	// 				return true;
+	// 			}
+	// 			re = new RegExp('^' + Search._getRegExp(chunk) + '$', 'gi');
+	// 			if (re.test(e[0])) {
+	// 				index = i;
+	// 				start = end;
+	// 				end = len;
+	// 				return true;
+	// 			}
+	// 			return false;
+	// 		})
 
-			if (timeout) {
-				return [];
-			} else if (b) {
-				// 找到
-				rs.push(dictArray[index]);
-				// console.log('[has]',dict[index]);
-				continue;
-			}
-			end--;
-		}
-		if (timeout) {
-			return [];
-		}
-		return rs;
-	}
+	// 		if (timeout) {
+	// 			return [];
+	// 		} else if (b) {
+	// 			// 找到
+	// 			rs.push(dictArray[index]);
+	// 			// console.log('[has]',dict[index]);
+	// 			continue;
+	// 		}
+	// 		end--;
+	// 	}
+	// 	if (timeout) {
+	// 		return [];
+	// 	}
+	// 	return rs;
+	// }
 
 	dict = new Reference([]);
 	function addDict(a) {
 		a = a || [];
 		if (typeof dict === 'undefined') { dict = new Reference(a); pushlog('create dict') } else { dict.concat(a); pushlog('add dict'); }
 		$('#dictArrayLengthUI').text(dict.array.length);
+		$('#dictArrayTimeUI').text(ftime('H:i:s'))
 	}
 
 	var lastEditTarget;
@@ -315,51 +447,14 @@ addEventListener('message',(e)=>{
 
 	{
 		//begin
-		let f = $('#TMToolFile');
-		let input = f.get(0);// <input>
+		let f = $('#TMToolFile')
+		let input = f.get(0)// <input>
 		f.on('change', (e) => {
-			let files, length, E, onloadCount = 0;
-			files = input.files;
-			length = files.length;// 文件数量
-			E = new Event('loaddropfiles');// 创建事件实例
-			E.files = files;// 加入文件
-			E.datas = [];// 加入数据
-			for (var i = 0; i < length; i++) {// 遍历文件
-				let file = files.item(i);// 文件
-				let filename = file.name;
-				console.log('Loading...', filename);
-				pushlog('Loading...', filename);
-				if (!(/\.txt$/.test(filename))) {// 是否扩展名为.txt
-					pushlog('No support the file type. ' + file.name + '(' + file.size + ')');// 不支持非.txt文件
-					continue;
-				}
-
-				var fr = new FileReader();// 读文件数据
-				fr.file = file;
-				fr.name = filename;
-				console.log('read', fr.name);
-				fr.onload = function (e) {
-					onloadCount++;
-					let t = e.target;
-					// E.datas['tmtoolfile_'+t.file.name] = t.result;
-					// E.datas['tmtoolfile_'+t.file.name] = t.result;
-					// E.datas['type'] = 'tmtool';
-					// E.datas['filename'] = t.file.name;
-					// console.log(t)
-					E.datas.push({
-						type: 'tmtool',
-						name: t.name,
-						data: t.result,
-						file: t.file
-					});
-					if (onloadCount === length) f.value = '', window.dispatchEvent(E);// 读完后触发事件
-				};
-				fr.readAsText(file);
-			}
-		});
+			inputFiles(e)
+		})
 		$('#importTMToolFile').on('click', () => {
-			f.click();
-		});
+			f.click()
+		})
 		// end
 	}
 
@@ -379,19 +474,16 @@ addEventListener('message',(e)=>{
 			for (var i = 0; i < length; i++) {// 遍历文件
 				let file = files.item(i);// 文件
 				let filename = file.name;
-				console.log('Loading...', filename);
-				pushlog('Loading...', filename);
+				pushlog(`[파일] ${filename}`);
 				if (!(/\.txt$/.test(filename))) {// 是否扩展名为.txt
-					pushlog('No support the file type. ' + file.name + '(' + file.size + ')');// 不支持非.txt文件
+					pushlog('식별할 수 없는 파일유형입니다.' + file.name + '(' + file.size + ')');// 不支持非.txt文件
 					continue;
 				}
 
 				var fr = new FileReader();// 读文件数据
 				fr.file = file;
 				fr.name = filename;
-				console.log('read', fr.name);
 				fr.onload = function (e) {
-					console.log('load', fr.name)
 					onloadCount++;
 					let t = e.target;
 					// E.datas['tmtoolfile_'+t.file.name] = t.result;
@@ -415,7 +507,6 @@ addEventListener('message',(e)=>{
 
 		$('#dictPaste').on('paste', function (e) {
 			e.preventDefault();
-
 			var t = e.originalEvent.clipboardData.getData('text/plain').trim();
 			var a = ao.stringToArray(t);
 			a = a.filter(function (e) {
@@ -426,246 +517,44 @@ addEventListener('message',(e)=>{
 			var oldDictArrayLength = dict.array ? dict.array.length : 0;
 		});
 
-		// let workPasting=false;
-		$('#workPaste').on('paste', function (e) {
-			e.preventDefault();
-			pushlog('문서를 분석하고 있습니다');
-			// if(workPasting) return ;
-			// workPasting=true;
-			let h = e.originalEvent.clipboardData.getData('text/html');
-			if (h) {
-				let _h = new DOMParser().parseFromString(h, 'application/xml');
-				h = Array.from(_h.firstChild.querySelectorAll('tr')).map(tr => {
-					return Array.from(tr.querySelectorAll('td')).map(td => {
-						console.log(td.textContent)
-						return td.textContent;
-						return td.textContent.replace(/[\r\n]/gm, '\\n').repleace(/\t/gm, ' ');
-					}).join('\t')
-				}).join('\n');
-
-				if (!h) {
-					h = Array.from(_h.firstChild.querySelectorAll('p')).map(p => {
-						return p.textContent.replace(/[\r\n]/gm, '\\n').repleace(/\t/gm, ' ');
-					}).join('\n');
-
-					if (!h) {
-						h = Array.from(_h.firstChild.querySelectorAll('span')).map(span => {
-							return span.textContent.replace(/[\r\n]/gm, '\\n').replace(/\t/gm, ' ');
-						}).join('\n');
-					} else {
-						pushlog('WORD구조 감지');
-					}
-				} else {
-					pushlog('HTML구조 감지');
-				}
-				pushlog('HTML구조 감지');
-			}
-			if (!h) h = e.originalEvent.clipboardData.getData('text/plain');
-			if (h) {
-				let a = ao.stringToArray(h);
-				// console.log(a);
-				a.forEach((e, i, a) => a[i] = e.filter(e => e));
-				let maxLength = a.reduce((r, e) => Math.max(r, e.length), 0);
-				a.forEach(e => {
-					let l = maxLength - e.length;
-					while (l > 0) {
-						e.push('');
-						l--;
-					}
-				});
-				if (maxLength > 0) {
-					// 粘贴1列的情况, 明显只有原文
-					{
-						let f = document.createDocumentFragment();
-						let table = document.createElement('table');
-						f.appendChild(table);
-
-						a.forEach((e, i) => {
-							let tr = table.appendChild(document.createElement('tr'));
-							let no = tr.appendChild(document.createElement('td'));
-							no.classList.add('no');
-							no.textContent = i + 1;
-							let source = tr.appendChild(document.createElement('td'));
-							source.classList.add('source');
-							source.textContent = e[0];
-							let target = tr.appendChild(document.createElement('td'));
-							target.classList.add('target');
-							target.contentEditable = 'plaintext-only';
-							if (maxLength > 1) target.textContent = e[1];
-							if (maxLength > 2) {
-								let comment = tr.appendChild(document.createElement('td'));
-								comment.classList.add('comment');
-								comment.textContent = e.slice(2).join('\n');
-							}
-							if (e[0].trim().length === 0) tr.classList.add('emptyRow');
-						});
-						// console.log(table)
-						document.getElementById('works').appendChild(f);
-						delete f;
-					}
-					pushlog('번역내용 추가');
-
-
-					let offset = $('#workPaste').offset();
-					showTip({ text: '번역내용 추가', css: Object.assign({ background: '#ff0c' }, offset), animate: { top: Math.max(0, offset.top - 10) + 'px' }, delay: 1000 });
-				}
-			}
-			// let p=new Promise((y,n)=>{
-			// 	setTimeout(()=>{
-			// 		if(t.length>0){
-			// 			var a=ao.stringToArray(t);
-			// 			if(a.length>0) {
-			// 				// 粘贴1列的情况, 明显只有原文
-			// 				if(a[0].length===1){
-			// 					let time=Date.now();
-			// 					a.forEach((e,i)=>{
-			// 						let tr=$('<tr>')
-			// 							.appendTo('#works')
-			// 							.append($('<td>').addClass('no').text(i+1))
-			// 							.append($('<td>').addClass('source').text(e[0]))
-			// 							.append($('<td>').addClass('target').attr({'contenteditable':'plaintext-only'}))
-			// 							.append($('<td>').addClass('comment').text(time))
-			// 						if(e[0].trim().length===0) tr.addClass('emptyRow');
-			// 					});
-
-			// 					// a.forEach(function(e){
-			// 					// 	return e.push('');
-			// 					// });
-			// 					// var table=ao.arrayToTable(a);
-
-			// 					// $(table).attr({dataname:'wordpaste',datatype:'clipboard'});
-			// 					// $('td:nth-child(1)',table).addClass('source');
-			// 					// $('td:nth-child(2)',table).addClass('target').attr({'contenteditable':'plaintext-only'});
-			// 					// $('tr',table).each(function(i,tr){
-			// 					// 	$(tr).prepend($('<td class="no"></td>').text(i+1));
-			// 					// });
-			// 					// $('#works').append(table);
-			// 				}else{
-			// 					// 粘贴2列开始, 需要选择原文和译文列
-			// 					let ms=maskScreen()
-			// 					let ok=$('<button>').text('추가').click((e)=>{
-			// 						let opt=[];
-			// 						let control=$('#mask tr.control:first()').find('td').each((i,td)=>{
-			// 							let o={}
-			// 							$(td).find('input').each((_,input)=>{
-			// 								o[input.name]=input.checked
-			// 							})
-			// 							opt[i]=o
-			// 						});
-
-			// 						let hasSource=opt.some(e=>e.source);
-			// 						if(hasSource===false) return alert('소스 지정!');
-
-			// 						let hasTarget=opt.some(e=>e.target);
-
-			// 						$('#mask tr.control').remove();
-			// 						opt.forEach((option,index)=>{
-			// 							$('#mask tr').each((_,tr)=>{
-			// 								let td=$(tr).find('td').eq(index);
-			// 								if(option.source) {
-			// 									td.addClass('source');
-			// 									if(td.text().trim().length===0) tr.classList.add('emptyRow');
-			// 								}
-			// 								if(option.target) td.addClass('target').attr('contenteditable','plaintext-only');
-			// 								if(option.edit) td.attr('contenteditable','plaintext-only')
-			// 							});
-
-			// 						})
-			// 						if(!hasTarget) {
-			// 							$('#mask td.source').after('<td class="target" contenteditable="plaintext-only">');
-			// 						}
-
-			// 						$('#mask tr').each((i,tr)=>{
-
-			// 							$(tr).find('.target').detach().prependTo(tr)
-			// 							$(tr).find('.source').detach().prependTo(tr)
-			// 							$('<td class="no">').prependTo(tr).text(i+1)
-			// 						})
-
-			// 						$('#mask table').appendTo('#works');
-			// 						$('#mask').empty().remove();
-			// 					}).appendTo(ms).css({background:'#6fa',color:'030',width:'40%'})
-			// 					let cancel=$('<button>').text('취소').click(()=>{
-			// 						ms.empty().detach()
-			// 					}).appendTo(ms).css({background:'#666',color:'#fff',width:'40%'})
-			// 					let table=ao.arrayToTable(a);
-			// 					let maxLength=get2DArrayMaxLength(a);
-			// 					let tr=createControlTr(maxLength);
-			// 					tr.prependTo(table);
-			// 					ms.append(table)
-
-			// 					// $(table).attr({dataname:'wordpaste',datatype:'clipboard'});
-			// 					// $('td:nth-child(1)',table).addClass('source');
-			// 					// $('td:nth-child(2)',table).addClass('target').attr({'contenteditable':'plaintext-only'});
-			// 					// $('tr',table).each(function(i,tr){
-			// 					// 	$(tr).prepend($('<td class="no"></td>').text(i+1));
-			// 					// });
-			// 					// $('#works').append(table);
-			// 				}
-			// 			}
-			// 		}
-			// 		console.log(a)
-			// 		y();
-			// 	});
-			// });
-			// p.then(()=>{
-			// 	workPasting=false;
-			// 	pushlog('[Finish] Pasted Missions!');
-			// });
-		});
-		// $('#workPaste').on('keydown',function(e){
-		// 	// ctrl+v
-		// 	if(e.ctrlKey&&e.keyCode===86&& !e.altKey && !e.shiftKey && !e.metaKey) return true;
-		// 	e.preventDefault();
-		// });
-		// $('#dictPaste').on('keydown',function(e){
-		// 	// ctrl+v
-		// 	if(e.ctrlKey&&e.keyCode===86&& !e.altKey && !e.shiftKey && !e.metaKey) return true;
-		// 	e.preventDefault();
-		// });
-
 
 		$('#worksFontSize').on('keydown change input', changeWorksFontSize);
 
 		// 查找内容
 		let prevFocusTarget;
-		$(document).on('focus', '#works .target', function (e) {
-			clacWorksStatus()
+		$(document).on('focus', '#works .target', async function (e) {
+			// log(e.type)
 			// 焦点太卡了。记录上一次的焦点吧。
 			if (prevFocusTarget === e.target && $('#works td.target').length > 1) return false;
 			prevFocusTarget = e.target;
+			SM.lastTargetRange = undefined
 
 			// 词典提示
 			if ($('#useDictTip').prop('checked')) {
 				// t: target text
 				// a: dict search result
-				// 
 
 				let t = $(e.target).prev('.source').text().trim();
 				let similarPercent = Number($('#similarPercent').val());
 
-
 				{
 					// 转移给worker执行
 					// var a=dict.search(t,similarPercent);
-					$('#tips').html('<strong style="color:blue;font-size:12px">검색 중입니다...</strong>');
-					if (lwsd.done !== true) {
+					$('#tips').empty()
+
+					if (!lwsd.done) {
 						lwsd.connect();
 					}
 					lwsd.target = e.target;
 					lwsd.send(100, t, similarPercent, dict.array);
 					lwsd.done = false;
-
-
 				}
-
-
 
 				{
 					// 焦点,上方自动显示
 					// var a=dict.search(t,similarPercent);
-					$('#statusDict').html('<strong style="color:blue;font-size:12px">검색 중입니다...</strong>');
-					if (lwsd2.done !== true) {
+					$('#statusDict').empty()
+					if (!lwsd2.done) {
 						lwsd2.connect();
 					}
 					lwsd2.target = $(e.target).parent().find('td.source').get(0);
@@ -681,61 +570,9 @@ addEventListener('message',(e)=>{
 					text = text.replace(/<\d+>/gim, '');
 
 					// console.log(text);
-
 					lwsd2.send(100, text, dict.array);
 					lwsd2.done = false;
 				}
-
-				// 获取最后一个格子的大小尺寸位置
-				// var last=$(e.target).parent().find('td:last()');
-				// var offset = last.offset();
-				// offset.width=last.width();
-				// offset.height=last.height();
-				// console.warn(offset)
-
-
-				// 转移到localeWorker中
-				// 提示内容
-				// var table=ao.arrayToTable(a);
-				// $('td:nth-child(4)',table).addClass('index');
-				// $('td:nth-child(3)',table).addClass('similar');
-				// $('td:nth-child(2)',table).attr({'contenteditable':'plaintext-only'}).addClass('target');
-				// $('td:nth-child(1)',table).attr({'contenteditable':'plaintext-only'}).addClass('source');
-				// $('tr',table).each(function(i,tr){
-				// 	$(tr).prepend($('<td class="no"></td>').text(i+1));
-				// });
-				// $('#tips').html(table.innerHTML).prop('scrollTop',0);
-				// // .css({position:'absolute',
-				// // 	top:offset.top+offset.height+60+document.body.scrollTop,left:8});	
-				// 	// left:offset.left+offset.width+document.body.scrollLeft});	
-				// // 规则A：对于如果最后一个编辑的内容，不要采取自动插入。
-				// if($('#auto100').prop('checked') && a && a[0] &&a[0][2]==100) {
-				// 	$(this).text(a[0][1]).css({background:$('#ctrlEnterColor').val()});
-				// }
-
-
-
-				// 新型算法。长度渐进法 lenSearch()
-				// let p=new Promise((y,n)=>{
-				// 	setTimeout(n,2000);
-				// 	let lenSearchRes=lenSearch(t, dict.array);
-				// 	y(lenSearchRes);
-				// });
-				// p.then((v)=>{
-				// 	if(v.length>0){
-				// 		let res=v.map((e,i)=>{
-				// 			let tr=$('<tr>');
-				// 			$('<td class="no"></td>').text(i+1).appendTo(tr);
-				// 			$('<td class="source"></td>').text(e[0]).appendTo(tr);
-				// 			$('<td class="target"></td>').text(e[1]).appendTo(tr);
-				// 			return tr;
-				// 		})
-				// 		console.log(res)
-				// 		$('#statusDict').empty().append(res);
-				// 	}
-				// }).catch(()=>{console.warn('[timeout] lenSearch');})
-
-
 			}
 
 			// 显示谷歌等
@@ -750,55 +587,78 @@ addEventListener('message',(e)=>{
 			// 当前行高亮显示
 			$('#works tr').removeClass('currentEditRow');
 			$(e.target).parent().addClass('currentEditRow');
+
+			// 让当前编辑框置顶、居中、置底。
+			let block = $('#focusScrollBlock').val()
+			e.target.scrollIntoView({ block })
 		});
 
 
-		// autoSizeDictWindow
-		let uiTips = document.querySelector('#tips');
-		$('#autoSizeDictWindow').click(e => {
-			uiTips.style.height = uiTips.style.height ? '' : '20em';
-		});
+		$(document).on('blur', '#works .target', (e) => {
+			SM.lastTargetRange = SM.range
+		})
 
 
 		// 全局按键侦听
 		$(window).on('keydown', function (e) {
-			if (e.keyCode === 19) {
-				match100($('#works tr.currentEditRow'))
-				return false
-			}
-			if (e.keyCode === 87 && e.ctrlKey) return e.preventDefault();
+			if (e.keyCode === 19 && !e.repeat) {// Pause Break
+				if (e.altKey) {
+					let t = $(e.target)
+					if (t.is('#works .target')) {
+						e.preventDefault()
+						let s = t.prev('.source')
+						let rs = cnEncode(s.text(), getTips())
+						log('Alt+Pause', rs)
+						if (rs.t) return t.text(rs.t)
 
-			if ($(e.target).is('.currentEditRow .target')) SM.lastTargetRange = undefined;
-			if (e.keyCode === 87 && e.ctrlKey) {
-				e.preventDefault();
-				e.stopPropagation();
-				e.stopImmediatePropagation();
-			} else if (e.keyCode === 113) {// 113:F2
-				// 移动到未翻译内容td上
-				e.preventDefault();
-				// $('#gotoUntranslationTarget').trigger('click');
-				{
-					$('#works tr')
-					.find('.target')
-					.not('.hide')
-					.not('.hide2')
-					.not('.hide3')
-					.not('.emptyRow')
-					.not('.splitTarget')
-					.not('.done')
-					.not('.doneAutoNumber')
-					.not('.doneAuto')
-					.not('.doneSmart')
-					.not('.doneAutoSpace')
-					.eq(0)
-					.focus()
+						let _red = red()
+						collector(_red)
+						rs = cnEncode(s.text(), collector.r)
+						log(rs)
+						if (rs.t) return t.text(rs.t)
+
+						rs = undefined
+						let dmp = new diff_match_patch()
+						_red.filter(e => e.similar > 80).map(e => {
+							let diff = dmp.diff_main(e.source, s.text())
+							dmp.diff_cleanupSemantic(diff)
+							diff = diff.filter(diff => diff[0] !== 0)
+							if (diff.length === 2) {
+								let search, replace
+								diff.forEach(e => {
+									if (e[0] === -1) search = e[1]
+									if (e[0] === 1) replace = e[1]
+								})
+								console.log(e.target, e.search, replace)
+								collector.r.forEach(e2 => {
+									if (e2[0] === search) {
+										let v = e.target.replace(search, replace)
+										if (!rs) rs = v
+										else if (rs === v) return rs
+									}
+								})
+								if (rs) {
+									pushlog('^ ^')
+									return t.text(rs)
+								}
+							}
+						})
+					}
+				} else {
+					match100($('#works tr:has(.selected)').add('#works tr.currentEditRow'))
 				}
-			} else if (e.keyCode === 114 && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {// 114:F3
-				// 移动到未翻译内容td上
+				return;
+			} else if (e.keyCode === 113) {// F2               移动到未翻译内容td上
 				e.preventDefault();
-				$('#downloadWorkT').trigger('click');
-			}else if (e.keyCode === 112) {// 112:F1
-				// 自动匹配100%内容
+				$('#works tr td.target').not('.hide, .hide2, .hide3, .emptyRow, .splitTarget, .done, .doneAutoNumber, .doneAuto, .doneSmart, .doneAutoSpace').eq(0).focus()
+			} else if (e.keyCode === 114) {// F3        移动到未翻译内容td上
+				e.preventDefault();
+				if (e.altKey) {
+					$('#downloadWork').trigger({ type: 'click' })
+				} else {
+					$('#downloadWorkT').trigger({ type: 'click', ctrlKey: e.ctrlKey })
+				}
+			} else if (e.keyCode === 112) {// F1        自动匹配100%内容
 				e.preventDefault();
 				var event = {
 					type: 'click',
@@ -808,210 +668,218 @@ addEventListener('message',(e)=>{
 					metaKey: e.metaKey
 				};
 				$('#MatchWork100').trigger(event);
-				pushlog('Automatically enter to translate content.');
-			} else if (e.code === 'ControlRight' && !e.repeat) {// 
-				console.log(e.code)
-				let t = $(e.target)
-				let s = t.prev('.source')
-				if (t.is('#works .target')) {
-					e.preventDefault()
-					let rs = cnEncode(s.text(), getTips())
-					if (rs.t) return t.text(rs.t)
+				pushlog('[시스템] 자동 채우기를 시작했습니다.');
+			} else if (e.keyCode === 192 && e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {// Alt+`
+				// 翻译技巧：将source按\s进行分割后逐个匹配记忆，最终拼凑成结果。
+				// 缺点：没有空格分割的语言中，无法使用。例：汉语、日语为source时。
+				// let t = $(e.target);
+				// if (t.is('#works td.source')) {// 在可编辑的source格时，按下快键
+				// 	e.preventDefault();
+				// 	let v = '';
+				// 	let source = t;
+				// 	let sourceText = source.text();
+				// 	let target = t.next('td.target');// 定位右边的target格
+				// 	let arr = sourceText.split(/\s+/g)
+				// 	arr.forEach(function (text) {
+				// 		v = dict.search(text, 100)[0];
+				// 		v = (v === undefined ? text : v[1]);
+				// 		target.text(target.text() + v);
+				// 		pushlog(text + '|' + v)
+				// 	});
+				// } else if (t.is('#works td.target')) {// 在target格时，按下按键
+				// 	let target = t;
+				// 	let source = target.prev('td.source');// 定位左边的source格
+				// 	let sourceText = source.text();
+				// 	let arr = sourceText.split(/\s+/g);
+				// 	arr.forEach(function (text) {
+				// 		v = dict.search(text, 100)[0];
+				// 		log(v)
+				// 		v = (v === undefined ? text : v[1]);
+				// 		target.text(target.text() + v);
+				// 		pushlog(text + '|' + v)
+				// 	});
+				// }
 
-					let _red = red()
-					collector(_red)
-					rs = cnEncode(s.text(), collector.r)
-					if (rs.t) return t.text(rs.t)
+				// 20190910改版！改为蓝色提示的拼凑。
+				// 根据蓝色提示的出现顺序进行拼凑。优先选择长度长的进行拼凑。
+				let statusDict = document.querySelector('#statusDict')
+				let trs = statusDict.querySelectorAll('tr')
+				let arr = Array.from(trs, function (tr) {
+					let r = {
+						s: tr.querySelector('.source').textContent,
+						t: tr.querySelector('.target').textContent,
+						i: parseInt(tr.querySelector('.index').textContent),
+					}
+					// r.sr = new RegExp(r.s.split('').map(e=>'\\s*\\'+e).join(''),'i')
+					return r
+				})
+				let sourceText = source.textContent
+				let resultText = ''
 
-					rs = undefined
-					let dmp = new diff_match_patch()
-					_red.filter(e => e.similar > 80).map(e => {
-						let diff = dmp.diff_main(e.source, s.text()).filter(diff => diff[0] !== 0)
-						if (diff.length === 2) {
-							let search, replace
-							diff.forEach(e => {
-								if (e[0] === -1) search = e[1]
-								if (e[0] === 1) replace = e[1]
-							})
-							console.log(e.target, e.search, replace)
-							collector.r.forEach(e2 => {
-								if (e2[0] === search) {
-									let v = e.target.replace(search, replace)
-									if (!rs) rs = v
-									else if (rs === v) return rs
+				let results = []
+				let cursor = 0
+				// 句子，从左到右进行正则匹配。
+				// 正则列表初始来源于#statusDict的.source
+				// 但随着句子指针的向右偏移，列表内容找不到匹配的项可以下一轮不用尝试了。
+				// 每次尝试匹配后，需要去掉没有匹配的.source正则，而句子指针需要相应地向右移动。
+				// 如果指针移动到最后位置，或者已经没有可以进行正则的项目时，该匹配任务结束。
+				// 根据匹配内容，拼凑出最终结果。
+
+				let result, startIndex, count = sourceText.length
+				while (count-- > 0) {
+					result = undefined
+					sourceText = sourceText.slice(cursor)
+					startIndex = sourceText.length
+					if (startIndex > 0) {
+						arr = arr.filter(e => !e.done)
+						if (arr.length === 0) break;
+						arr.forEach((e) => {
+							let { s, t, i } = e
+							let re = new RegExp(s.split('').map(e => {
+								// 重点！！数值不用加\\
+								if (/[A-Z0-9a-z]/.test(e)) {
+									return e
+								} else {
+									return '\\s*\\' + e
 								}
-							})
-							if (rs) {
-								pushlog('^ ^')
-								return t.text(rs)
+							}).join(''), 'i')
+							let m = re.exec(sourceText)
+							if (m) {
+								let text = m[0]
+								let start = m.index
+								let end = start + text.length
+								if (start < startIndex) {
+									result = { s, t, i, text, start, end }// targetText
+									startIndex = start
+									cursor = end
+								} else if (start === startIndex) {
+									if (end > result.end) {
+										result = { s, t, i, text, start, end }// targetText
+										startIndex = start
+										cursor = end
+									} else if (end === result.end && result.i < i) {
+										result = { s, t, i, text, start, end }// targetText
+										startIndex = start
+										cursor = end
+									}
+								}
+
+							} else {
+								e.done = true
 							}
+						})
+					} else {
+						break;
+					}
+
+					if (result) results.push(result)
+				}
+
+				if (results.length) {
+					let tar = target
+					if (tar) {
+						let v = results.map(e => e.t)
+						let splitter = ''
+						if (v.some(e => /[가-힣]/.test(e))) {
+							splitter = ' '
 						}
-					})
+						v = results.map(e => e.t).join(splitter)
+						tar.textContent = v
+						results.forEach(e => {
+							pushlog(e.s + ' = ' + e.t)
+						})
+					}
 				}
-			} else if (e.keyCode === 192 && e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {// Alt＋`  逐个词典匹配
-				e.preventDefault();
-				var v = '';
-				var t = $(e.target);
-				t = $(t);
-				if (t.is('#works td.source')) {
-					var source = t;
-					var target = t.next('td.target');
-					var sourceText = source.text();
-					var arr = sourceText.split(/\s+/g)
-					arr.forEach(function (text) {
-						v = dict.search(text, 100)[0];
-						v = (v === undefined ? text : v[1]);
-						target.text(target.text() + v);
-						pushlog(v);
-					});
-				} else if (t.is('#works td.target')) {
-					var target = t;
-					var source = target.prev('td.source');
-					var sourceText = source.text();
-					var arr = sourceText.split(/\s+/g);
-					arr.forEach(function (text) {
-						v = dict.search(text, 100)[0];
-						v = (v === undefined ? text : v[1]);
-						target.text(target.text() + v);
-						pushlog(v);
-					});
-				}
-			} else if (e.keyCode === 117) {
-				// 117:F6
+				// log(JSON.stringify(results))
+
+			} else if (e.keyCode === 117) {// F6       将分割句子拼凑起来
 				e.preventDefault();
 				mergeSplits()
-			} else if (e.keyCode === 119 || e.keyCode === 19) {
-				// 119:F8
+			} else if (e.keyCode === 119) {// F8       切割长文章
 				e.preventDefault();
-				// 改变功能为切割长文章
 				let tar = $(e.target);
 				if (tar.is('#works .currentEditRow .target') && !tar.is('.split')) {
-					if (e.ctrlKey) {
+					if (e.ctrlKey) {// Ctrl+F8        同F6
 						// 合并
 						mergeSplits()
-					} else if (e.altKey) {
-						$('#works .target').each((i, e) => {
-							splitLong(e)
-						})
+					} else if (e.altKey) {// Alt+F8       非完成语句全部分割
+						$('#works .target')
+							.not('.done,.doneAuto,.doneAutoSpace,.doneAutoNumber,.doneSmart')
+							.each((i, e) => {
+								splitLong(e)
+							})
 					} else {
 						// 分解长文
 						splitLong(tar)
 					}
 				}
-
-				// {
-				// 			let tar=$('#works .currentEditRow .target')
-				// 				let p=tar.parent();
-				// 				let s=p.find('.source');
-				// 				let st=s.text();
-				// 				let t=tar;
-				// 				let tt=t.text();
-
-				// 				let re=/(?=(?!\d)\.)|\{\\r\\n\}|\\n/g;
-				// let arr=[];
-				// let i=0;
-				// let r=st.replace(re,function(...a){
-				//   //console.log(a);
-				//   let aLastIndex=a.length-1;
-				//   let aIndex=aLastIndex-1;
-				//   let index=a[aIndex];
-				//   let str=a[aLastIndex];
-				//   i=index+a[0].length;
-				//   let c=str.slice(i,index);
-				//   console.log(index,i, c,str);
-				//   return str.slice(i,index);
-				// });
-
-				// //console.log(r);
-
-				// }
-				// e.preventDefault();
-				// var s=window.getSelection().toString();
-				// if(!s.trim()) return $('#googleResult').text('No selected content.');
-				// var g=$('#useNet').prop('checked'),n=$('#useNaver').prop('checked'),d=$('#useDaum').prop('checked');
-				// // if(g||n||d){
-				// 	var s=lastSourceSelectionText;
-				// 	if(s && s.trim()){
-				// 		var t=$('#netTarget').val();
-				// 		function net(n,s,t){
-				// 			if(net.count===undefined) net.count=0;
-				// 			net.count++;
-				// 			$('#'+n+'Result').text('Loading...('+net.count+')');
-				// 			this[n](s,t,function(o){
-				// 				$('#'+n+'Result').text(o.error||o.result.join('\n'));
-				// 			});
-				// 		}
-				// 		net('google', s,t);
-				// 		// net('naver',  s,t);
-				// 		// net('daum',   s,t);
-				// 	}
-				// // }
-			} else if (e.ctrlKey && e.keyCode === 81 && !e.shiftKey && !e.altKey && !e.metaKey) {
-				// Enter，ctrl+Q，ctrl+S 来保存到词库
+			} else if (e.keyCode === 81 && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {// Ctrl+Q      保存到词库
 				e.preventDefault();
 				let lsst = $('#lsst');
 				let stst = $('#ltst');
-				let lsstt = lsst.text().trim();
-				let ststt = stst.text().trim();
+				let lsstText = lsst.text().trim();
+				let ststText = stst.text().trim();
 
-				if (lsstt && ststt) {
+				if (lsstText && ststText) {
 					// 保存
-					var l = dict.array.length;
-					dict.add(lsstt, ststt);
+					// var l = dict.array.length;
+					dict.add(lsstText, ststText);
 					let rect, rect2;
 
-					rect = lsst.offset();
-					rect2 = $('#dictArrayLengthUI').offset();
+					rect = lsst.get(0).getBoundingClientRect()
+					rect2 = $('#dictArrayLengthUI').get(0).getBoundingClientRect()
 					showTip({
-						text: lsstt,
-						css: { background: '#f00', color: '#fff' },
+						text: lsstText,
+						css: { background: '#c85050', color: '#ff0', width: rect.width },
 						x: rect.left, y: rect.top,
-						animate: [{ left: rect.left - 10 }, { left: rect2.left, top: rect2.top, opacity: 0 }]
+						animate: [{ left: rect2.x, top: rect2.top - rect.height, delay: 1000 }, { left: rect2.left, top: rect2.top, opacity: 0 }]
 					});
 
-					rect = stst.offset();
+					rect = stst.get(0).getBoundingClientRect()
 					showTip({
-						text: ststt,
-						css: { background: '#f00', color: '#fff' },
+						text: ststText,
+						css: { background: '#c85050', color: '#ff0', width: rect.width },
 						x: rect.left, y: rect.top,
-						animate: [{ left: rect.left - 10 }, { left: rect2.left, top: rect2.top, opacity: 0 }]
+						x: rect.left, y: rect.top,
+						animate: [{ left: rect2.x, top: rect2.bottom, delay: 1000 }, { left: rect2.left, top: rect2.top, opacity: 0 }]
 					});
-				} else {
-					pushlog('[Warning] Need content.');
-				}
-			} else if (e.keyCode === 68 && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
-				//ctrl+shift+d  复制上面.target的内容
-				e.preventDefault();
-				var c = $(document.activeElement);
-				s = c.parent().prevAll().not('.hide,.hide2').first().find(Array.prototype.map.call(document.activeElement.classList, function (e) { return '.' + e; }).join(' '));
-				if (s.length) {
-					c.text(c.text() + s.text());
-					pushlog('Copy: ' + s.text());
-				} else {
-					pushlog('No copy.');
-				}
-			} else if (e.keyCode === 83 && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-				//ctrl+s 保存内容
-				e.preventDefault();
-				saveDatas();
 
-				try {
-					pushlog('[Save]', dict.array.length);
-				} catch (err) {
-					pushlog('[Error]', err.message);
+					lsst.empty()
+					stst.empty()
+				} else {
+					pushlog('[경고] 내용이 부족합니다.');
 				}
+			} else if (e.keyCode === 68 && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {// Ctrl+Shift+D       复制上面.target的内容
+				e.preventDefault();
+				let c = $(document.activeElement);
+				if (c.is('#works .target')) {
+					s = c.parent().prevAll(':not(.hide,.hide1.hide2)').first()
+					if (s.length) {
+						let v = s.find('.target').text()
+						if (v) SM.set(v)
+					}
+				}
+			} else if (e.keyCode === 83 && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {// Ctrl+S       保存内容
+				e.preventDefault()
+				saveDatas()
 			}
 		});
 
-		$(document).on('keydown', '.target', function (e) {
-
+		$(document).on('keydown', function (e) {
 			// 忽略Ctrl键自身反复触发，有什么用？下面又没有Ctrl自身的命令
 			// if (e.ctrlKey && (e.keyCode === 17) && e.repeat) return ;
-
 			// 在译文格子中按下回车键时的处理。
-			if (e.keyCode === 13) {
-				e.preventDefault();
+			if (e.keyCode === 13) {// Enter
+				if (saveSelectedHandle()) {
+					log('save')
+					e.preventDefault()
+					saveDatas()
+					return;
+				}
 
+				if (!$(e.target).is('.target')) return;
+
+				e.preventDefault();
 				// Enter 提交数据，并跳转下一行。
 				let current;
 				let tar = $(e.target);
@@ -1076,7 +944,7 @@ addEventListener('message',(e)=>{
 						dict.array[i][0] = s;
 						dict.array[i][1] = t;
 						dict.from(dict.array);
-						pushloghtml($('<p>').append($('<h6>').text('[+]')).append($('<span>').text(s)).append($('<br>')).append($('<p>').text(t)));
+						pushlog(`[source]${s} <==> [target]${t}`)
 					}
 
 					// ctrl+enter 换色
@@ -1085,6 +953,7 @@ addEventListener('message',(e)=>{
 					// 	t.animate({background:$('#ctrlEnterColor').val()});
 					// }
 				} else {
+					// log('#works td.target')
 					// var no=$('.no',p);
 					// no.animate({backgroundColor:$('#ctrlEnterColor').val()},function(){no.removeAttr('style');});
 					var s = $('.source', p);
@@ -1094,7 +963,7 @@ addEventListener('message',(e)=>{
 					var l = dict.array.length;
 					dict.array.push([s, t]);
 					dict.from(dict.array);
-					pushloghtml($('<p>').append($('<h6>').text('[+]')).append($('<span>').text(s)).append($('<br>')).append($('<p>').text(t)));
+					// pushloghtml($('<p>').append($('<h6>').text('[+]')).append($('<span>').text(s)).append($('<br>')).append($('<p>').text(t)));
 					// ctrl+enter 换色
 					// var t=$(e.target);
 					// if($('#ctrlEnter').prop('checked')){
@@ -1137,15 +1006,13 @@ addEventListener('message',(e)=>{
 				current.eq(0).focus();
 
 
-				// saveDatas();// 直接保存太卡，需要缓一缓了。问题很严重。
-				// 延迟时间保存
-				if (typeof window.privateTimeout === 'number') {
-					clearTimeout(window.privateTimeout);
+				requestAnimationFrame(() => {
+					clearTimeout(window.privateTimeout)
 					window.privateTimeout = setTimeout(() => {
-						saveDatas();
-					}, 1000);
-				}
-
+						saveDatas()
+						pushlog('[saved]', ftime('H:i:s.ms'))
+					}, 2000);
+				})
 			} else if (e.ctrlKey) {
 				// Ctrl + Ins 键，将原文复制到译文格子中。
 				if (e.keyCode === 45) {// <insert>
@@ -1154,51 +1021,10 @@ addEventListener('message',(e)=>{
 						SM.text = t.parent().find('.source').text();
 					}
 				}
-			}
-			// else if(e.shiftKey){
-			// 	e.preventDefault();
-			// 		// shift键 
-			// 		let key=parseInt(e.key);
-			// 		switch(e.key) {
-			// 			case '1':
-			// 			case '2':
-			// 			case '3':
-			// 			case '4':
-			// 			case '5':
-			// 			case '6':
-			// 			case '7':
-			// 			case '8':
-			// 			case '9':{
-			// 				key=parseInt(e.key)-1;
-			// 			}
-			// 			case '0':{
-			// 				key=9;
-			// 			}
-			// 			case '`':{
-			// 				key=0;
-			// 			}
-			// 			default:{
-			// 				e.preventDefault();
-			// 				var target=$(e.target);
-			// 				var sourceText=target.prev('.source').text().trim();
-			// 				var tr=$('#tips').find('tr').eq(key);
-			// 				var s=tr.find('.source').text().trim();
-			// 				var t=tr.find('.target').text().trim();
-			// 				var v=smartMatch(sourceText, [s,t]);
-			// 				target.append(v);// ctrl+num
-			// 				console.log(key)
-			// 				// console.log(v)
-			// 				// console.log(target,v)
-			// 				// replaceTD(t);
-			// 				return ;
-			// 			}
-			// 		}
-			// }
-			else if (e.keyCode === 27) {
+			} else if (e.keyCode === 27) {
 				//esc
-				$('#tips').empty();
-				$('#statusDict').empty();
 				$('.tipSelect').remove();
+				$('#tips, #statusDict, #lsst, #ltst').empty()
 			}
 		});
 
@@ -1206,25 +1032,10 @@ addEventListener('message',(e)=>{
 		// 锁定未翻译目标
 		$('#gotoUntranslationTarget').click(function (e) {
 			nextEmptyTarget(e.ctrlKey);
-			// let ts=$('#works .target:empty()');
-			// let t=ts.eq(0).trigger('focus');
-			// if(ts.length){
-			// 	var w=$('#works');
-			// 	w.prop('scrollTop', t.prop('offsetTop')-w.prop('offsetTop')-10);
-
-			// 	let countChar=0;
-			// 	let countRow=ts.each((_,e)=>{
-			// 		countChar+=$(e).prev('td.source').text().length;
-			// 	}).length;
-			// 	pushlog('No translated item is '+countRow+'ea('+countChar+'byte).');
-
-			// }else{
-			// 	pushlog('No target... ^ ^');
-			// }
-			// delete ts,t;
 		});
 
-		// 下载词库
+
+		// 红色记忆下载为文本
 		$('#downloadDict').click(function () {
 			try {
 				dict.array.forEach(function (e) {
@@ -1241,31 +1052,40 @@ addEventListener('message',(e)=>{
 				});
 			}
 			dict.from(dict.array);
-			downloadFile('dict', ao.arrayToString(dict.array));
+
+			let filename = getDictFilename()
+
+			downloadFile(filename, ao.arrayToString(dict.array));
 		});
+		// 红色记忆下载为Excel
 		$('#downloadDictXLS').click(function () {
-			let fn = formatName(location.search) + '_dict_' + Date.now() + '.xls';
 			let sheet = XLSX.utils.aoa_to_sheet(dict.array);
 			let html = XLSX.utils.sheet_to_html(sheet);
 			let table = $(html).filter('table').get(0)
 			let wb = XLSX.utils.table_to_book(table, { sheet: "Sheet1" });
-			XLSX.writeFile(wb, fn);
+
+			let filename = getDictFilename() + '.xlsx'
+
+			XLSX.writeFile(wb, filename);
 		});
+
+		function getDictFilename() {
+			let filename = 'dict_' + formatName(location.search.slice(1))
+			filename += '_' + ftime().replace(/\//g, '').replace(/:/g, '').replace(/ |\./g, '_')
+			return filename
+		}
+
 
 		// 提交所有翻译内容
 		$('#mergeDict').on('click', function (e) {
 			if (confirm('[Warning] Are you sure you want to overwrite your work with dict?')) {
-				// $('#useDictTip').add('#useNet').add('#useNaver').add('#useDaum').prop('checked',false);
-				// $('#works td.target:not(:empty())').trigger({type:'keydown',keyCode:13,ctrlKey:true});
-				// $('#useDictTip').prop('checked',true);
 				$('#works tr').each((i, e) => {
 					let source = $(e).find('.source').text().trim();
 					let target = $(e).find('.target').text().trim();
 					if (source && target) {
 						// 保存
 						dict.add(source, target);
-
-						pushloghtml($('<p>').append($('<h6>').text('[+]')).append($('<p>').text(source)).append($('<p>').text(target)))
+						pushlog(`[source]${source.textContent} <==> [target]${target.textContent}`)
 					}
 				});
 			}
@@ -1275,68 +1095,63 @@ addEventListener('message',(e)=>{
 		$('#downloadWorksExcel').on('click', function (e) {
 			showTip('잠시만 기다려 주십시오.(최대 30초 대기)');
 			var fn = formatName(location.search) + '_works_' + Date.now() + '.xls';
-			doit($('works').get(0), fn, 'xls');
+			doit($('#works').get(0), fn, 'xls');
 		});
+
+		$('#downloadDictsTxt').click(async function () {
+			const RE = /_(?<pname>\w+)dict$/i
+			let time = ftime().replace(/\//g, '').replace(/:/g, '').replace(/ |\./g, '_')// 格式化的当前时间串
+			let filename = `tm4_dicts_${time}.zip`
+			let zip = new JSZip()
+
+			let keys = await tm.keys()
+			for (let i = 0; i < keys.length; i++) {
+				let k = keys[i]
+				let m = k.match(RE)
+				if (m) {
+					const { groups: { pname } } = m// 焦点1：项目名——pname
+					try {
+						if (pname.indexOf('__' === -1) && pname.indexOf('_') > -1) {
+							pname = pname.replace(/_([A-Z0-9a-z]{2})/g, '%$1')
+							if (pname.indexOf('%') > -1) {
+								pname = decodeURI(pname)
+							}
+						}
+					} catch (err) {
+						console.debug(pname, '无法decodeURI')
+					}
+					let arr = await tm.getItem(k)// 焦点2：项目数据——arr
+					let content = arr.map(e => e.join('\t')).join('\n')
+					zip.file(pname + '.txt', content)
+				}
+			}
+			// wopts = { bookType: 'xlsx', bookSST: false, type: 'array' };
+			// wbout = XLSX.write(workbook, wopts);
+			zip.generateAsync({
+				type: "blob",
+				mimeType: "application/zip",
+				compression: "DEFLATE"
+			}).then(function (z) {
+				downloadFile2(filename, z)
+			});
+
+		});
+
+
 		$('#downloadWork').click(function (e) {
-			showTip('잠시만 기다려 주십시오.(최대 30초 대기)');
 			let
 				ctrl = e.ctrlKey,
 				shift = e.shiftKey,
 				alt = e.altKey,
 				meta = e.metaKey;
 
-			$('#works table').each(function (_, table) {
-				let r = [], hasTextKey = false;
-				if ($('td.textKey').length) r.push('[FieldNames]\nTextKey\tText\tComment\n[Table]');
-
-				$('tr', table).clone().find('td.no').remove().end().each(function (i, tr) {
-					var k = $('td.textKey', tr);
-					var c = $('td.targetComment', tr).text().trim();
-					var row = [];
-					if (k.length) {
-						hasTextKey = true;
-						var t = $('td.target', tr);
-						row.push(k.get(0).textContent.trim());
-						row.push(t.get(0).textContent.trim());
-						if (ctrl) {
-							// empty comment add datetime
-							if (!Boolean(c)) c = new Date().toISOString();
-						} else if (shift) {
-							// all comment replace datetime
-							c = new Date().toISOString();
-						}
-						row.push(c);
-						r.push(row.join('\t'));
-					} else {
-						var row = [];
-						$('td', tr).each(function (i, td) {
-							row.push(td.textContent.trim());
-						});
-						r.push(row.join('\t'));
-					}
-				});
-
-				let name = table.getAttribute('dataname');
-				console.log(name);
-
-				var data = r.join('\n');
-				// 下载works时，textKey。
-				if (hasTextKey || ctrl || shift || alt || meta) {
-					if (hasTextKey) {
-						// downloadFileUcs2(name + 'work', data);
-						downloadFileUcs2(name, data);
-					} else {
-						downloadFile(name + 'work', data);
-					}
-				} else {
-					copyToTempResult(data);
-				}
-			});
-
-			if ($('#works table').length === 0 && $('#works tr') !== 0) {
-				$('#works').each(function (_, tbody) {
+			// tbody下的tbody被和谐了。如果没被和谐。
+			let range = $('#works tbody[dataname]')
+			if (range.length) {
+				range.each(function (_, tbody) {
 					let r = [], hasTextKey = false;
 					if ($('td.textKey').length) r.push('[FieldNames]\nTextKey\tText\tComment\n[Table]');
+
 					$('tr', tbody).clone().find('td.no').remove().end().each(function (i, tr) {
 						var k = $('td.textKey', tr);
 						var c = $('td.targetComment', tr).text().trim();
@@ -1364,59 +1179,64 @@ addEventListener('message',(e)=>{
 						}
 					});
 
-					let name = '';
+					let name = tbody.getAttribute('dataname')
+					var data = r.join('\n')
 
-					var data = r.join('\n');
-					// 下载works时，textKey。
-					if (hasTextKey || ctrl || shift || alt || meta) {
-						if (hasTextKey) {
-							downloadFileUcs2(name, data);
-						} else {
-							downloadFile(name + 'work', data);
-						}
+					// 直接下载，以前不会下载
+					if (hasTextKey) {
+						// downloadFileUcs2(name + 'work', data);
+						downloadFileUcs2(name, data);
 					} else {
-						copyToTempResult(data);
+						downloadFile(name, data);
 					}
 				});
+				log('download1')
+			} else {
+				range = $('#works tr')
+				if (range.length) {
+					let data = ''
+					range.each((i, tr) => {
+						let source = $(tr).find('.source').text().replace(/\r\n|\n/g, '\\n')
+						let target = $(tr).find('.target').text().replace(/\r\n|\n/g, '\\n')
+						data += source + '\t' + target + '\n'
+					})
+					downloadFileUcs2('works_' + Date.now() + '.txt', data);
+					log('download2', data)
+				}
 			}
-
-
-
-
-
-
-
-
-
+			log('download')
 		});
-		$('#downloadWorkT').click(function (e) {
-			let rs = $('#works td.target').toArray().map(td => td.textContent).join('\n')
-			console.log(rs)
 
+
+		$('#downloadWorkT').on('click', function (e) {
 			let data;
-			var r = [], ctrl = e.ctrlKey, shift = e.shiftKey, alt = e.altKey, meta = e.metaKey;
-			dict.array.forEach(function (e) {
-				e.forEach(function (v, i, a) {
-					a[i] = String(v).trim();
-				});
-			});
+			let r = []
 			$('#works td.target').each(function (i, td) {
 				r.push(td.textContent.trim());
 			});
-			// var table=$('<table>').append($('#works').find('tr').clone()).get(0);
-			// console.log(table);
-
-			if (ctrl || shift || meta) {
-				downloadFile('work-t', data);
-				return;
-			}
-
-			if (alt) {
-				r = r.filter(function (e) { return e.length > 0; });
-			}
 			data = r.join('\n');
-			copyToTempResult(data);
+
+			if (e.ctrlKey) {
+				downloadFile('work_target', data);
+			} else {
+				copyToTempResult(data);
+			}
 		});
+
+		$('#downloadWorkS').on('click', function (e) {
+			let data;
+			let r = []
+			$('#works td.source').each(function (i, td) {
+				r.push(td.textContent.trim());
+			});
+			data = r.join('\n');
+
+			if (e.ctrlKey) {
+				downloadFile('work_source', data);
+			} else {
+				copyToTempResult(data);
+			}
+		})
 
 		// 清空任务
 		$('#clearWork').click(function (e) {
@@ -1438,6 +1258,7 @@ addEventListener('message',(e)=>{
 					dict.array.length = 0;
 					$('#works tr .target').removeAttr('style').removeClass('done');
 					$('#dictArrayLengthUI').text(dict.array.length);
+					$('#dictArrayTimeUI').text(ftime('H:i:s'))
 					saveDatas();
 				}, 100);
 			}
@@ -1445,11 +1266,17 @@ addEventListener('message',(e)=>{
 
 
 		// 选择任务
-		$('#selectWorks').click(function () {
-			var s = window.getSelection();
-			s.removeAllRanges();
-			s.selectAllChildren($('#works').get(0));
-			document.execCommand('copy', true);
+		$('#selectWorks').click(function (e) {
+			if (e.ctrlKey) {
+				var s = window.getSelection();
+				s.removeAllRanges();
+				s.selectAllChildren($('#works').get(0));
+				document.execCommand('copy', true);
+			} else if (e.altKey) {
+				$('#works tr td.no').each((i, td) => td.classList.remove('selected'))
+			} else {
+				$('#works tr td.no').each((i, td) => td.classList.add('selected'))
+			}
 		})
 
 		// 过滤词典
@@ -1534,93 +1361,103 @@ addEventListener('message',(e)=>{
 		myReplace('tips', 'target');
 
 
-		$('#tipsSourceFilterAll').on('change', function (e) {
-			var id = '#tips';
-			$(id).empty();
+		$('#tipsSourceFilterAll').on('keydown', function (e) {
+			if (e.keyCode !== 13) return;
 			var v = e.target.value;
-			if (v.length > 0) {
-				var regexp = Search.getRegExp(v, 'gim', $(id + 'SourceRegExp').prop('checked'));
-				console.log(regexp);
-				var a = dict.array, i = a.length, e, tr, s, t, m, count = 1;
+			if (v.length) {
+				let id = '#tips';
+				let tips = document.querySelector(id)
+				if (!tips) return;
+				tips.innerHTML = ''
+				let regexp = Search.getRegExp(v, 'gim', $(id + 'SourceRegExp').prop('checked'));
+				let a = dict.array, i = a.length, row, tr, s, t, m, count = 1;
 				while (true) {
 					if (--i === -1) break;
 					regexp.lastIndex = undefined;
-					e = a[i];
-					if (e) {
-						s = e[0];
-						t = e[1];
+					row = a[i];
+					if (Array.isArray(row)) {
+						s = row[0];
+						t = row[1];
 						if (s && t) {
 							m = regexp.test(s);
 							if (m) {
 								regexp.lastIndex = undefined;
-								no = $('<td class="no"></td>').text(count++);
-								m = $('<td class="match"></td>').text(Array.from(s.match(regexp)).join('\n'));
-								s = $('<td class="source" contenteditable="plaintext-only"></td>').text(s);
-								t = $('<td class="target" contenteditable="plaintext-only"></td>').text(t);
-								$('<tr>')
-									.append(no)
-									.append(s)
-									.append(t)
-									.append(m)
-									.append($('<td class="index"></td>').text(i))
-									.appendTo(id);
-								regexp.lastIndex = undefined;
-								console.log()
+								let no = document.createElement('td')
+								no.className = 'no'
+								no.textContent = count++
+								let source = document.createElement('td')
+								source.className = 'source'
+								source.textContent = s
+								let target = document.createElement('td')
+								target.className = 'target'
+								target.textContent = t
+								let m = document.createElement('td')
+								m.className = 'match'
+								m.textContent = Array.from(s.match(regexp)).join('\n')
+								let index = document.createElement('td')
+								index.className = 'index'
+								index.textContent = i
+								let tr = document.createElement('tr')
+								tr.appendChild(no)
+								tr.appendChild(source)
+								tr.appendChild(target)
+								tr.appendChild(m)
+								tr.appendChild(index)
+								tips.appendChild(tr)
 							}
-						} else {
-							a.splice(i, 1);
 						}
-					} else {
-						a.splice(i, 1);
 					}
 				}
-			} else {
-				$(id).empty();
 			}
 		});
 
-		$('#tipsTargetFilterAll').on('change', function (e) {
-			var id = '#tips';
-			$(id).empty();
-			var v = e.target.value;
+		$('#tipsTargetFilterAll').on('keydown', function (e) {
+			if (e.keyCode !== 13) return;
+			let v = e.target.value;
 			if (v.length > 0) {
-				var regexp = Search.getRegExp(v, 'gim', $(id + 'TargetRegExp').prop('checked'));
-				console.log(regexp);
-				var a = dict.array, i = a.length, e, tr, s, t, m, count = 0;
+				let id = '#tips';
+				let tips = document.querySelector(id)
+				if (!tips) return;
+				tips.innerHTML = ''
+				let regexp = Search.getRegExp(v, 'gim', $(id + 'TargetRegExp').prop('checked'));
+				let a = dict.array, i = a.length, count = 0, s, t;
 				while (true) {
 					if (--i === -1) break;
 					regexp.lastIndex = undefined;
-					e = a[i];
-					if (e) {
-						s = e[0];
-						t = e[1];
+					let row = a[i];
+					if (row) {
+						s = row[0];
+						t = row[1];
 						if (s && t) {
 							m = regexp.test(t);
 							if (m) {
 								regexp.lastIndex = undefined;
-								no = $('<td class="no"></td>').text(count++);
-								m = $('<td class="match"></td>').text(Array.from(t.match(regexp)).join('\n'));
-								s = $('<td class="source" contenteditable="plaintext-only"></td>').text(s);
-								t = $('<td class="target" contenteditable="plaintext-only"></td>').text(t);
-								$('<tr>')
-									.append(no)
-									.append(s)
-									.append(t)
-									.append(m)
-									.append($('<td class="index"></td>').text(i))
-									.appendTo(id);
-								regexp.lastIndex = undefined;
-								console.log()
+								let no = document.createElement('td')
+								no.className = 'no'
+								no.textContent = count++
+								let source = document.createElement('td')
+								source.className = 'source'
+								source.textContent = s
+								let target = document.createElement('td')
+								target.className = 'target'
+								target.textContent = t
+								let m = document.createElement('td')
+								m.className = 'match'
+								m.textContent = Array.from(t.match(regexp)).join('\n')
+								let index = document.createElement('td')
+								index.className = 'index'
+								index.textContent = i
+								let tr = document.createElement('tr')
+								tr.appendChild(no)
+								tr.appendChild(source)
+								tr.appendChild(target)
+								tr.appendChild(m)
+								tr.appendChild(index)
+								tips.appendChild(tr)
 							}
-						} else {
-							a.splice(i, 1);
 						}
-					} else {
-						a.splice(i, 1);
 					}
 				}
-			} else {
-				$(id).empty();
 			}
 		});
 
@@ -1635,189 +1472,68 @@ addEventListener('message',(e)=>{
 
 
 		// 需要从记录中全文匹配，如果没有则智能匹配。auto100
-		$('#MatchWork100').click(function (clickEvent) {
-			clickEvent.preventDefault();
-			match100()
+		$('#MatchWork100').click(function (e) {
+			e.preventDefault();
+			if (e.ctrlKey) {
+				let range = $('#works td.no.selected').parent('tr').add('#works .currentEditRow')
+				match100(range)
+			} else {
+				match100()
+			}
 		});
-		$('#hideDone').click(function (clickEvent) {
-			clickEvent.preventDefault();
-			hideDone()
-		});
+
+		$('#hideDone').on('click', hideDone)
+		$('#showAll').on('click', showAll)
 
 		// ____________________________________________________
 
 
-		let isNumQA = false;
 		$('#numQA').click(function (e) {
-			if (isNumQA) {
-				$('#works tr').not('.emptyRow').removeClass('hide hide2 hide3').find('td.qa').remove();
-				isNumQA = false;
-				return;
-			}
-			isNumQA = true;
-
 			// Number QA 核心算法 --start
-			function numberQA(s, t) {
-				let r = /[-+]?\d{1,3}((,?)\d{3})?(\.\d+)?[%]?/gmi
+			$('#works tr').each((i, e) => {
+				let $e = $(e)
+				let $source = $e.find('.source')
+				let $target = $e.find('.target')
+				let $qa = $e.find('.qa')
 
-				s = s.match(r) || [];
-				t = t.match(r) || [];
+				if ($qa.length === 0) $qa = $('<td class="qa">').appendTo($e)
+				$qa.removeClass('success failure')
 
-				return arrayDiff(s, t);
-			}
-			function arrayDiff(a, b) {
-				let _a = [], _b = [];
-				a.forEach((e, i) => {
-					if (b.indexOf(e) === -1) {
-						_a.push({ value: e, index: i });
-					}
-				});
-				b.forEach((e, i) => {
-					if (a.indexOf(e) === -1) {
-						_b.push({ value: e, index: i });
-					}
-				});
+				let { done, sa, ta } = numCheck($source.text(), $target.text())
 
-				let ok = true, _al = _a.length, _bl = _b.length;
-				if (_al === _bl) {
-					if (a.join('\x02') !== b.join('\x02')) {
-						ok = false;
-					}
+				if (done) {
+					$qa.text('OK').addClass('success')
 				} else {
-					ok = false;
+					$qa.text(sa.join() + ' | ' + ta.join()).addClass('failure')
 				}
-				return { arr1: a, arr2: b, diff1: _a, diff2: _b, ok };
-			}
-			// Number QA 核心算法 --start
-
-			$('#works td.qa').remove();
-			$('#numQA').prop('running', !$('#numQA').prop('running'))
-			if (!$('#numQA').prop('running')) {
-				$('#worksTargetFilter').val('').trigger('input');
-				$('#useDictTip').prop('checked', true);
-				$('#numQA').css('boxShadow', '');
-				return;
-			}
-
-			$('#numQA').css('boxShadow', '0 0 4px #F0F');
-			$('#useDictTip').prop('checked', false);
-
-			$('#worksTargetFilter').val('숫자QA');
-			var count = 0;
-			$('#works tr').removeClass('hide,hide1,hide2');
-			$('#works tr').not('.emptyRow').each(function (i, tr) {
-				var qa = $(tr).find('.qa');
-				if (qa.length === 0) {
-					qa = $('<td class="qa">').appendTo(tr);
-				}
-
-				var source = $(tr).find('td.source').eq(0).text() || '';
-				var target = $(tr).find('td.target').eq(0).text() || '';
-
-				let result = numberQA(source, target);
-				if (result.ok) {
-					$(tr).addClass('hide');
-				} else {
-					let table = $('<table>').appendTo(qa);
-					for (let i = 0, len = Math.max(result.arr1.length, result.arr2.length); i < len; i++) {
-						let tr = $('<tr>').appendTo(table);
-						let s = result.arr1[i];
-						let t = result.arr2[i];
-						tr.append($('<td>').text(s || '').css({ textAlign: 'right' }).addClass('qa-index-' + i));
-						tr.append($('<td>').text(t || '').addClass('qa-index-' + i));
-						if (s !== t) tr.css({ color: '#f00', fontWeight: 'bold' });
-					}
-					result.diff1.forEach(e => {
-						table.find('td.qa-index-' + e.index).eq(0).css({ background: '#ff0' });
-					});
-					result.diff2.forEach(e => {
-						table.find('td.qa-index-' + e.index).eq(1).css({ background: '#ff0' });
-					});
-				}
-
-				// var s,t,sm,tm;
-				// sm=source.match(asciiNospace);
-				// s=sm ? Array.from(sm) : [];
-
-
-				// tm=target.match(asciiNospace);
-				// t=tm ? Array.from(tm) : [];
-				// if(s.join('').split('').sort().join('')===t.join('').split('').sort().join('')) return ;
-
-				// if(s.length!==t.length){
-
-				// 	// $(tr).find('td.target').css('background','#f96');
-				// 	count++;
-				// 	if(s) {
-				// 		let _s=$('<p>').css({borderBottom:'1px solid #900',paddingBottom:2}).appendTo(qa);
-				// 		for(let i=0, len=s.length, v; i<len; i++){
-				// 			$('<span>').css({borderBottom:'1px solid #900',paddingBottom:2}).text(s[i]).appendTo(_s);
-				// 		}
-				// 	}
-				// 	if(t) {
-				// 		let _t=$('<p>').css({borderBottom:'1px solid #900',paddingBottom:2}).appendTo(qa);
-				// 		for(let i=0, len=t.length, v; i<len; i++){
-				// 			$('<span>').css({borderBottom:'1px solid #900',paddingBottom:2}).text(t[i]).appendTo(_t);
-				// 		}
-				// 	}
-				// 	qa.css('background','#fdd');
-				// }else{
-				// 	var resplan='B';
-				// 	s.sort();
-				// 	t.sort();
-				// 	// $(tr).find('td.target').css('background','#f69');
-				// 	if(s) {
-				// 		let _s=$('<p>').css({borderBottom:'1px solid #900',paddingBottom:2}).appendTo(qa);
-				// 		for(let i=0, len=s.length, v; i<len; i++){
-				// 			$('<span>').css({borderBottom:'1px solid #900',paddingBottom:2}).text(s[i]).appendTo(_s);
-				// 		}
-				// 	}
-				// 	if(t) {
-				// 		let _t=$('<p>').css({borderBottom:'1px solid #900',paddingBottom:2}).appendTo(qa);
-				// 		for(let i=0, len=t.length, v; i<len; i++){
-				// 			$('<span>').css({borderBottom:'1px solid #900',paddingBottom:2}).text(t[i]).appendTo(_t);
-				// 		}
-				// 	}
-				// 	if(s.join('').split('').sort().join('')===t.join('').split('').sort().join('')) {
-				// 		resplan='C';
-				// 		// $(tr).find('td.target').css('background','#ff9');
-				// 		return qa.css('background','#ffd');
-				// 	}
-				// 	qa.css('background','#fee');
-				// 	count++;
-
-				// }
-			});
-			$('#works td.qa:empty()').parent().addClass('hide');
-			if (count) pushlog('🍀', 'Found numeric mismatchs, ' + count + 'ea, Good luck!');
-			else pushlog('☘', 'Did not find numeric mismatchs.');
+			})
 		});
+
 
 		$('#dictQA').on('click', function () {
-			$('#worksTargetFilter').val('dictQA');
-			var tmpDict = filterDict();
+			let dict = getSTWords()
 
-			$('#works tr').each(function (_, tr) {
-				var qa = $(tr).find('.qa');
-				if (qa.length === 0) {
-					qa = $('<td class="qa">').appendTo(tr);
+			$('#works tr').each((i, e) => {
+				let $e = $(e)
+				let $source = $e.find('.source')
+				let $target = $e.find('.target')
+				let $qa = $e.find('.qa')
+
+				if ($qa.length === 0) $qa = $('<td class="qa">').appendTo($e)
+				$qa.removeClass('success failure')
+
+				let ret = wordCheck($source.text(), $target.text(), dict)
+
+				if (ret.done) {
+					$qa.text('OK').addClass('success')
+				} else {
+					$qa.text(ret.map((e) => e.join('|')).join('\n')).addClass('failure')
 				}
-				var qars = [];
-				var s = $(tr).find('.source');
-				var t = $(tr).find('.target');
+			})
+		})
 
-				tmpDict.forEach(function (e, i) {
-					// **** qa ddb
-					var ds = e[0], dt = e[1];
-					if (Search.getRegExp(ds).test(s.text())) {
-						if (!Search.getRegExp(dt).test(t.text())) {
-							qars.push($('<li>').text(ds + '👁' + dt).get(0).outerHTML);
-						}
-					}
-				});
-				qa.html('<ol>' + qars.join('') + '</ol>');
-			});
-		});
+
+
 
 
 		// import text lines
@@ -1887,103 +1603,106 @@ addEventListener('message',(e)=>{
 		});
 
 
-		// 查找替换按钮
+		// 绑定事件，侦听util工具栏中的查找和替换按钮
 		function activeSRButton(id) {
 			$('#' + id).on('click', function (e) {
-				if (!confirm('Are you sure you want to replace?')) return false;
-
-				var id = e.target.getAttribute('id').replace('Button', '');
-				if (id) {
-					$('#' + id).trigger({ type: 'keydown', keyCode: 13 });
-					console.log(id)
+				if (confirm('전체바꾸기를 진행합니까?')) {
+					let id = e.target.getAttribute('id').replace('Button', '');
+					if (id) {
+						$('#' + id).trigger({ type: 'keydown', keyCode: 13 });
+						console.log(id)
+					}
 				}
 			});
 		}
-
 		activeSRButton('statusDictSourceReplaceButton');
 		activeSRButton('statusDictTargetReplaceButton');
 		activeSRButton('worksSourceReplaceButton');
 		activeSRButton('worksTargetReplaceButton');
 		activeSRButton('tipsSourceReplaceButton');
 		activeSRButton('tipsTargetReplaceButton');
-
-
-
-
-		setTimeout(function () {
-			if (dict && dict.array && dict.array.length) {
-				pushlog('Dictionary have ' + dict.array.length + 'ea.', { 'background': '#00F', color: '#FFF' });
-			}
-		}, 1000);
-
 	}
 
-	var lastSourceSelectionText, lastTargetSelectionText;
 	window.addEventListener('loaddropfiles', function (e) {
-		// e.datas  [ {type, name, data} ,...]
-		// return console.log(e.datas);
-		let ls = ao.ls, table, datas = e.datas, name, type, data;
-		for (let i = 0, len = datas.length; i < len; i++) {
-			name = datas[i].name;
-			type = datas[i].type;
-			data = datas[i].data;
-			table = ao.tmstringToTable(data);
-			// console.log('-'.repeat(32));
-			// console.log(name);
-			// console.log(type);
-			// console.log(data);
+		setTimeout(() => {
+			// e.datas  [ {type, name, data} ,...]
+			// return console.log(e.datas);
+			let ls = ao.ls, table, datas = e.datas, name, type, data, fragment
+			fragment = document.createDocumentFragment()
+			for (let i = 0, len = datas.length; i < len; i++) {
+				pushlog(`${i}/${len} 도입 중...`)
+				name = datas[i].name
+				type = datas[i].type
+				data = datas[i].data
 
-			$(table).find('.target').end().attr({ dataType: type, dataName: name });
+				{
+					let _table = ao.tmstringToTable(data)
+					let tbody = document.createElement('tbody')
+					tbody.setAttribute('datatype', _table.getAttribute('datatype'))
+					tbody.setAttribute('dataname', _table.getAttribute('dataname'))
+					tbody.setAttribute('class', _table.getAttribute('class'))
+					tbody.innerHTML = _table.innerHTML
+					table = tbody
+				}
 
-			$(table).find('.source').each(function (i, e) {
-				$(e).text($(e).text().replace(/\{\\r\\n\}/g, '\\n'));
-			});
-
-			if (type === 'tmtool') table.classList.add('tmtoolfile');
-			$('#works').append(table);
-		}
+				$(table)
+					.attr({ dataType: type, dataName: name })
+					.find('.source').each(function (i, e) {
+						$(e).text($(e).text().replace(/\{\\r\\n\}/g, '\\n'))
+					})
+	
+				if (type === 'tmtool') table.classList.add('tmtoolfile')
+				fragment.appendChild(table)
+			}
+			
+			$('#works').get(0).appendChild(fragment)
+		}, 100);
 	}, true);
 
 
 
 	// loadDatas
 	{
-		// var ls=ao.ls;
-		// try{
-		// 	$('#works').html(ls.get('works'));
-		// 	setTimeout(function(){
-		// 		$('#works tr').removeClass('hide hide2');
-		// 	},1000);
-		// }catch(err){
-		// 	$('#works').html('');
-		// }
-
-		// try{
-		// 	dict=new Reference(ls.get('dict'));
-		// }catch(err){
-		// 	dict=new Reference([]);
-		// }
-
-		// var t;
-		// t=ls.get('ctrlEnterColor');
-		// if(t){
-		// 	$('#ctrlEnterColor').val(t)
-		// }
-
-		// t=ls.get('useNet');	if(t){$('#useNet').prop('checked',t); };
-		// t=ls.get('useNaver');	if(t){$('#useNaver').prop('checked',t); };
-		// t=ls.get('useDaum');	if(t){$('#useDaum').prop('checked',t); };
-		// t=ls.get('netTarget');	if(t){$('#netTarget').val(t); };
 		let prefix = location.search;
-		// console.info('loadDatas:', JSON.stringify(prefix), prefix.length);
-
-		let tm = localforage.createInstance({ name: 'tm' });
+		tm = localforage.createInstance({ name: 'tm' });
+		// 读入worksn内容
 		tm.getItem(formatName(prefix) + 'works', (j, v) => {
-			if (j) { console.warn('[Error] No read works. ' + j.message) } else if (v) {
-				$('#works').html(v).find('tr').removeClass('hide hide2 hide3');
-				$('#works .tip').remove();
-				// 自动移动光标
-				$('#works .currentEditRow td.target').focus();
+			if (j) {
+				console.warn('[Error] No read works. ' + j.message)
+			} else if (v) {
+				let fragment = document.createElement('table')
+				fragment.innerHTML = v
+				fragment.querySelectorAll('.tip')
+					.forEach(function (tip) {
+						tip.remove()
+					})
+				fragment.querySelectorAll('.target')
+					.forEach((target) => {
+						target.classList.remove('wait')
+					})
+				fragment.querySelectorAll('.target.done')
+					.forEach((target) => {
+						if (!target.textContent.trim()) {
+							let { classList } = target
+							classList.remove('done')
+							classList.remove('doneAuto')
+							classList.remove('doneAutoSpace')
+							classList.remove('doneAutoNumber')
+							classList.remove('doneAutoSmart')
+						}
+					})
+
+				let works = document.querySelector('#works')
+				works.appendChild(fragment)
+
+				setTimeout(() => {
+					// 不知为何，这里需要延迟才能正常对焦。
+					let target = works.querySelector('#works .currentEditRow .target')
+					if (target) {
+						target.scrollIntoView({ block: 'center' })
+						target.focus()
+					}
+				}, 200);
 			}
 		});
 		tm.getItem(formatName(prefix) + 'dict', (j, v) => {
@@ -2003,50 +1722,67 @@ addEventListener('message',(e)=>{
 		tm.getItem(formatName(prefix) + 'useDictTip', (j, v) => { if (j) { console.warn('[Error] No read useDictTip . ' + j.message); } else if (v) { $('#useDictTip').prop('checked', v); /* console.log('useDictTip', v); */ } });
 		tm.getItem(formatName(prefix) + 'worksFontSize', (j, v) => { if (j) { console.warn('[Error] No read fontSize . ' + j.message); } else if (v) { $('#worksFontSize').val(v); /* console.log('font-size', v); */ changeWorksFontSize(); } });
 		tm.getItem('pinkthema', (j, v) => {
-			if (v){
+			if (v) {
 				$('#pinkthema').trigger('click')
 			}
 			themaReady[1] = true
 			showBody()
 		});
-	}
 
+		const RE = /_(?<pname>\w+)dict$/i
+		const $projectAnchors = $('#projectAnchors')
+		tm.keys().then((ks) => {
+			ks.forEach((k) => {
+				let m = k.match(RE)
+				if (m) {
+					let { groups: { pname } } = m
+					try {
+						pname = decodeURI(pname.replace(/_/g, '%'))
+					} catch (err) {
 
-	function backup() {
-		let bd = localforage.createInstance({ name: 'backup' }), date = new Date(), dictArrayLength, length;
-		if (typeof dict !== 'undefined' && dict.array && (dictArrayLength = dict.array.length)) {
-
-			bd.getItem(formatName(location.search) + 'dict', (j, v) => {
-				if (v && Array.isArray(v) && (length = v.length) > dictArrayLength) {
-					if (!confirm('[Warning] Do you replace? ' + length + '(old)--->(new)' + dictArrayLength)) return console.error('Failed to back up.');
+					}
+					$('<a>').prop({ href: '?' + pname, textContent: pname }).appendTo($projectAnchors)
 				}
-				bd
-					.setItem(formatName(location.search) + 'dict', dict.array)
-					.catch((e) => { if (e) { alert('[Error] no save dict. ' + e.message); } })
-
-				bd.setItem(formatName(location.search) + 'backuptime', date.getTime())
-					.catch(e => { if (e) { alert('[Error] no save time. ' + e.message); } })
-
-				bd.setItem(formatName(location.search) + 'backuptimestring', date.toLocaleString())
-					.catch(e => { if (e) { alert('[Error] no save time. ' + e.message); } })
-			});
-		}
+			})
+		})
 	}
 
 
-	function restore() {
-		let bd = localforage.createInstance({ name: 'backup' });
-		if (typeof dict === 'undefined') window.dict = new Reference();
-		bd.getItem(formatName(location.search) + 'dict',
-			(j, v) => {
-				if (j) {
-					console.warn('[Error] No read dict . ' + j.message);
-					addDict();
-				} else if (v) {
-					addDict(v);
-				}
-			});
-	}
+	// 【备份】
+	// function backup() {
+	// 	let bd = localforage.createInstance({ name: 'backup' }), date = new Date(), dictArrayLength, length;
+	// 	if (typeof dict !== 'undefined' && dict.array && (dictArrayLength = dict.array.length)) {
+
+	// 		bd.getItem(formatName(location.search) + 'dict', (j, v) => {
+	// 			if (v && Array.isArray(v) && (length = v.length) > dictArrayLength) {
+	// 				if (!confirm('[Warning] Do you replace? ' + length + '(old)--->(new)' + dictArrayLength)) return console.error('Failed to back up.');
+	// 			}
+	// 			bd
+	// 				.setItem(formatName(location.search) + 'dict', dict.array)
+	// 				.catch((e) => { if (e) { alert('[Error] no save dict. ' + e.message); } })
+
+	// 			bd.setItem(formatName(location.search) + 'backuptime', date.getTime())
+	// 				.catch(e => { if (e) { alert('[Error] no save time. ' + e.message); } })
+
+	// 			bd.setItem(formatName(location.search) + 'backuptimestring', date.toLocaleString())
+	// 				.catch(e => { if (e) { alert('[Error] no save time. ' + e.message); } })
+	// 		});
+	// 	}
+	// }
+	// 【还原】
+	// function restore() {
+	// 	let bd = localforage.createInstance({ name: 'backup' });
+	// 	if (typeof dict === 'undefined') window.dict = new Reference();
+	// 	bd.getItem(formatName(location.search) + 'dict',
+	// 		(j, v) => {
+	// 			if (j) {
+	// 				console.warn('[Error] No read dict . ' + j.message);
+	// 				addDict();
+	// 			} else if (v) {
+	// 				addDict(v);
+	// 			}
+	// 		});
+	// }
 
 	// setTimeout(() => {
 	// 	let message = '[Auto backup]';
@@ -2062,47 +1798,25 @@ addEventListener('message',(e)=>{
 		let length;
 		let tm = localforage.createInstance({ name: 'tm' });
 
-		tm.setItem(formatName(location.search) + 'works', $('#works').html()).catch((e) => { if (e) { alert('[Error] no save works. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'works', $('#works').html()).catch((e) => { if (e) { console.error('[Error] no save works. ' + e.message); } });
 
 		if (dict && dict.array && (length = dict.array.length)) {
+			dict.array = dict.array.filter((e) => e[1])
 			dict.array = uniqueDictionaryArray(dict.array);
 			tm.setItem(formatName(location.search) + 'dict', dict.array)
-				.catch((e) => { if (e) { alert('[Error] no save dict. ' + e.message); } });
+				.catch((e) => { if (e) { console.error('[Error] no save dict. ' + e.message); } });
 
-			$('#dictArrayLengthUI').text(length);
+			$('#dictArrayLengthUI').text(length)
+			$('#dictArrayTimeUI').text(ftime('H:i:s'))
 		}
 		tm.setItem(formatName(location.search) + 'netTarget', $('#netTarget').val());
-		tm.setItem(formatName(location.search) + 'useNet').catch((e) => { if (e) { alert('[Error] no save useNet. ' + e.message); } });
-		tm.setItem(formatName(location.search) + 'useNaver', $('#useNaver').prop('checked')).catch((e) => { if (e) { alert('[Error] no save useNaver. ' + e.message); } });
-		tm.setItem(formatName(location.search) + 'useDaum', $('#useDaum').prop('checked')).catch((e) => { if (e) { alert('[Error] no save useDaum. ' + e.message); } });
-		tm.setItem(formatName(location.search) + 'useDictTip', $('#useDictTip').prop('checked')).catch((e) => { if (e) { alert('[Error] no save useDictTip. ' + e.message); } });
-		tm.setItem(formatName(location.search) + 'worksFontSize', $('#worksFontSize').val()).catch((e) => { if (e) { alert('[Error] no save worksFontSize. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'useNet').catch((e) => { if (e) { console.error('[Error] no save useNet. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'useNaver', $('#useNaver').prop('checked')).catch((e) => { if (e) { console.error('[Error] no save useNaver. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'useDaum', $('#useDaum').prop('checked')).catch((e) => { if (e) { console.error('[Error] no save useDaum. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'useDictTip', $('#useDictTip').prop('checked')).catch((e) => { if (e) { console.error('[Error] no save useDictTip. ' + e.message); } });
+		tm.setItem(formatName(location.search) + 'worksFontSize', $('#worksFontSize').val()).catch((e) => { if (e) { console.error('[Error] no save worksFontSize. ' + e.message); } });
 		tm.setItem('pinkthema', $('#pinkthema').prop('checked'));
 	}
-
-
-	let lastAutoSaveTimeStamp;
-	// autoSaveData
-	$(window).on('blur', (e) => {
-		e.preventDefault();
-
-		// 保存间隔不至少 30s
-		lastAutoSaveTimeStamp = lastAutoSaveTimeStamp || 0;
-		if ((Date.now() - lastAutoSaveTimeStamp) > 30000) {
-			saveDatas();
-			lastAutoSaveTimeStamp = Date.now();
-		}
-	});
-
-	/*
-	1	11
-	2	22
-	3	33
-	*/
-
-
-
-
 
 
 
@@ -2139,20 +1853,16 @@ addEventListener('message',(e)=>{
 	// 问题：在翻译时，mission中的相似文章，没有像Dictionary一样同时被显示出来，所以很难统一语句。
 	// 问题：需要在某个范围内，大量替换某个关键字、关键词的功能。
 	// 问题：自动提示本文中的词语，越长的开始匹配，有可能有2个原文词合并的情况，但有可能又是别的译文。
-
-
 	$(document).on('keydown', function (e) {
-		let oe = e.originalEvent;
-		let code
-		try{
-			code = oe.code;
-		}catch(err){
-			console.error(err, e, oe)
-			
+		let { repeat, keyCode, code } = e
+		// 16:Shift  17:Ctrl   18:Alt
+		if (repeat || keyCode === 16 || keyCode === 17 || keyCode === 18) return e.preventDefault();
+		if (code === undefined) {
+			let oe = e.originalEvent;
+			if (oe === undefined) return console.error(e)
+			code = oe.code
+			if (code === undefined) return console.error(oe)
 		}
-
-		// let repeat=oe.repeat;
-		// if(repeat) return oe.preventDefault();
 		switch (code) {
 			case 'Digit0':
 			case 'Digit1':
@@ -2174,50 +1884,73 @@ addEventListener('message',(e)=>{
 			case 'Numpad7':
 			case 'Numpad8':
 			case 'Numpad9': {
-
-				// alt+num
-				let tipName;
+				let tipName
 				if (e.ctrlKey) {// ctrl+num
-					e.preventDefault();
-					tipName = '#tips';
+					e.preventDefault()
+					tipName = '#tips'
 				} else if (e.altKey) {// alt+num
-					e.preventDefault();
-					tipName = '#statusDict';
+					e.preventDefault()
+					tipName = '#statusDict'
 				}
 				if (tipName && $(tipName).find('tr').length) {
-					let tar = $(e.target);
+					let tar = $(e.target)
+					e.preventDefault()
+					let key = parseInt(code.match(/\d/))
+					if (key === 0) key = 10
+					key--
+					let t = $(tipName).find('tr').eq(key).find('.target').text().trim()
 
-					oe.preventDefault();
-					let key = parseInt(code.match(/\d/));
-					if (key === 0) key = 10;
-					key--;
-					let t = $(tipName).find('tr').eq(key).find('.target').text().trim();
+					let { startContainer, endContainer } = SM.range
 
-					// $('.currentEditRow .target').focus();
-					if (SM.lastTargetRange) SM.range = SM.lastTargetRange;
 					if (
-						(SM.range.endContainer.nodeType === 3
-							&& $(SM.range.endContainer.parentNode).is('#works .target')
-							&& SM.range.startContainer.nodeType === 3
-							&& $(SM.range.startContainer.parentNode).is('#works .target'))
-						||
-						(SM.range.endContainer.nodeType === 1
-							&& $(SM.range.endContainer).is('#works .target')
-							&& SM.range.startContainer.nodeType === 1
-							&& $(SM.range.startContainer).is('#works .target'))
+						startContainer && startContainer.nodeType === 1 && startContainer.classList.contains('target')
+						&& endContainer && endContainer.nodeType === 1 && endContainer.classList.contains('target')
 					) {
-						SM.text = t;// selection.range
+
+					} else if (
+						startContainer && startContainer.nodeType === 3 && startContainer.parentElement.classList.contains('target')
+						&& endContainer && endContainer.nodeType === 3 && endContainer.parentElement.classList.contains('target')
+					) {
+
+					} else if (SM.lastTargetRange) {
+						SM.range = SM.lastTargetRange;
+					}
+
+					let range = SM.range
+					endContainer = range.endContainer
+					startContainer = range.startContainer
+					if (startContainer.normalize) startContainer.normalize();// 很重要，由于Text片段太多，需要合并，否则影响td的宽度变长，css无法控制长度。
+					if (
+						(endContainer.nodeType === 3
+							&& $(endContainer.parentNode).is('#works .target')
+							&& startContainer.nodeType === 3
+							&& $(startContainer.parentNode).is('#works .target'))
+						||
+						(endContainer.nodeType === 1
+							&& $(endContainer).is('#works .target')
+							&& startContainer.nodeType === 1
+							&& $(startContainer).is('#works .target'))
+					) {
+						SM.insert(t);// 替换 selection.range 所选中的内容为 t。
 						if (e.ctrlKey) {// show diff  -- dmp
 							if (t.length) {
 								let t1 = $(tipName).find('tr').eq(key).find('.source').text().trim();
 								let t2 = $(e.target).parent().find('.source').text().trim();
 								let dmp = new diff_match_patch();
-								let dmpHTML = dmp.diff_prettyHtml(dmp.diff_main(t1, t2));
-								pushloghtml(dmpHTML);
+								let diff = dmp.diff_main(t1, t2)
+								dmp.diff_cleanupSemantic(diff)
+								let dmpHTML = dmp.diff_prettyHtml(diff);
 
-								let { x, y, height } = tar.get(0).getBoundingClientRect();
+
+								let { x, y, width, height } = tar.get(0).getBoundingClientRect();
 								// showTip({html:dmpHTML, x, y:Math.max(y-height,0)});
-								showTip({ html: dmpHTML, x, y, delay: 5000, css: { transform: 'translate(0,-100%)' } });
+								showTip({
+									name: 'uniq-tips',// 使用唯一一个
+									delay: -1,// 用Esc或blur事件消除
+									html: dmpHTML, x, y, width,
+									css: { transform: 'translate(0,-100%)' }
+								});
+								$(pushloghtml(dmpHTML));
 							}
 						}
 					}
@@ -2228,47 +1961,8 @@ addEventListener('message',(e)=>{
 	});
 
 
-	$(document).on('mousedown', '#tips td, #statusDict td', function (e) {
-		if (e.which === 3) {// e.which===3  rightclick contextmenu
-			let tar = $(e.target);
-
-			$('#statusDict,#tips').empty();// 删除一个就得隐藏，否则序号全部会错乱。
-
-			e.preventDefault();
-			let p, s, t;
-			p = $(e.target).parent('tr')
-			n = p.find('td.no').text()
-			s = p.find('td.source').text()
-			t = p.find('td.target').text()
-			i = parseInt(p.find('td.index').text())
-
-			if ((s !== dict.array[i][0]) && (t !== dict.array[i][1])) {
-				// 字典中没有找到原文译文匹配的记录时，不进行删除，以免误删该索引上的记录。
-				pushlog('Failed to delete! Unable to find the corresponding record.');
-				return false;
-			}
-
-			if (confirm(`< Warning > Do you want to delete?
-No: - ${n} -
-source: ${s}
-target: ${t}
-index: - ${i} -`)) {
-				var l = dict.array.length;
-				var item = dict.array.splice(i, 1);
-				$(e.target).parent('tr').remove();
-				console.info(`[ Deleted ] ${i} ${item.join('\n')}`);
-				pushlog(`[ Deleted ] ${i} ${item.join('\n')}`);
-			}
-		}
-	});
 
 
-	$(document).on('contextmenu', '#works td.no', function (e) {
-		e.preventDefault();
-		if (confirm('[Warning] Delete row ' + e.target.textContent + '?!')) {
-			e.target.parentElement.remove();
-		}
-	});
 
 
 	/*
@@ -2379,14 +2073,14 @@ index: - ${i} -`)) {
 					e.target = temp;
 				}
 			});
-			pushlog('소스와 타겟이 바뀌어졌습니다.');
 
-			let mask = maskScreen();
-			let table = ao.arrayToTable(dict.array.slice(0, 10));
-			mask.append(table).one('click', function () {
-				mask.remove();
-			});
-			mask.find('table').css({ maxWidth: '60em', margin: 'auto auto', opacity: .7, userSelect: 'none' });
+
+
+			alert(
+				'[주의] 번역기록의 소스와 타겟이 위치전환합니다.\n'
+				+ dict.array.slice(0, 100).map(e => e.join('-->')).join('\n')
+				+ '...'
+			)
 		})
 	}
 
@@ -2397,26 +2091,6 @@ index: - ${i} -`)) {
 	}`);
 	}
 
-
-	// $(() => {
-	// 	$(window).on('keydown', e => {
-	// 		if (e.keyCode === 121 && e.ctrlKey) {// F10 backup
-	// 			e.preventDefault();
-	// 			backup();
-	// 			pushlog('[Manual backup]');
-	// 			console.info('[Manual backup]');
-	// 		}
-	// 	});
-	// });
-
-
-	{
-		let visible = false;
-		$('#helpHeader').click(() => {
-			visible = !visible;
-			ui = $('#helpContent')[visible ? 'fadeIn' : 'fadeOut']();
-		})
-	}
 
 	{
 		$('#restoreButton').click(() => {
@@ -2446,14 +2120,6 @@ index: - ${i} -`)) {
 		return a;
 	}
 
-
-
-	{
-		let projectName = location.search.slice(1);
-		$('#projectName').text(projectName);
-	}
-
-
 	function addTip(text, dom) {
 		let t = $('<div>').appendTo('body').one('click', (e) => e.target.remove());
 		let rect;
@@ -2480,11 +2146,11 @@ index: - ${i} -`)) {
 		let _customChars = '[\\x00-\\x19\\x21-\\xff→♥♣◆★※≪≫▶◀ⅠⅡⅢⅣ]+';
 		$(window).on('keydown', e => {
 			if (e.keyCode === 120) {// 120:F9
-
 				// ctrl+shift+alt+f9 配置
 				if (e.ctrlKey && e.shiftKey && e.altKey) {
 					return _customChars = prompt('매칭 할 내용을 넣어 주세요', _customChars) || _customChars;
 				}
+
 				e.preventDefault();
 				insertTips(e);// 插入找到的内容
 			}
@@ -2494,15 +2160,52 @@ index: - ${i} -`)) {
 			if (t.is('#works .target')) {
 				let s = t.parent().find('.source');
 
-				let regExp = new RegExp((e.ctrlKey || e.altKey) ? _customChars : chars, 'gm');
-				let r = s.text().match(regExp).join('').replace('：', ':');
+				let regExp, r
+				if (e.ctrlKey || e.altKey) {
+					regExp = new RegExp(_customChars, 'gm')
+				} else {
+					let rs = [
+						/\/\w+/,
+						/(?:\p{Open_Punctuation})[0-9a-zA-Z]{6,}(?:\p{Close_Punctuation})/,
+						/\[-\]/,
+						/\{\d\}/,
+						/(?:[\-\+] *)?(?:,?\d{1,3})*(?:\.?\d+)(?:(?:e)\d+)?(?: *%)?/,
+						/\p{Number}+/u,
+						/\p{Punctuation}+/,
+						/\p{Emoji}+/,
+						/[\\x00-\\x19\\x21-\\xff＃＆＊~＠§※★☆○●◎◇◆□■△▲▽▼◁◀▷▶♤♠♡♥♧♣⊙◈▣◐◑®※≪≫▶◀]/,
+					]
+					regExp = new RegExp(rs.map((e) => e.source).join('|'), 'gui')
+				}
+
+				r = s.text().match(regExp).join('').replace('：', ':');
 				// console.debug(regExp,r);
 				if (e.altKey) {
 					r = r.replace(/'([\s\S]*?)'/g, '「$1」');
 					r = r.replace(/"([\s\S]*?)"/g, '『$1』');
 					// r=r.replace(/:/g,'：');
 				}
-				SM.text = r;
+
+				// 由于Ctrl+F9错误插入到source中，解决此BUG。
+				if (r) {
+					// let range = window.range = SM.range
+					// if(range)
+					// SM.range.deleteContents()
+					// SM.range.insertNode(new Text(r))
+					// SM.s.removeAllRanges()
+					// if(SM.focusNode && SM.focusNode.nodeType
+					if (SM.s.focusNode && SM.s.focusNode.nodeType === Document.TEXT_NODE && SM.s.anchorNode && SM.s.anchorNode.nodeType === Document.TEXT_NODE) {
+
+						if (parentNodeIsTargetClasses(SM.s.focusNode) && parentNodeIsTargetClasses(SM.s.anchorNode)) {
+							SM.text = r
+						}
+					} else if (SM.s.focusNode && SM.s.focusNode === SM.s.anchorNode && SM.s.anchorNode.classList.contains('target')) {
+						SM.text = r
+					} else {
+						warn(r)
+						warn(SM.s)
+					}
+				}
 			}
 		}
 	}
@@ -2511,7 +2214,6 @@ index: - ${i} -`)) {
 	{
 		$('#main .utilsource').on('contextmenu', e => {
 			if (e.originalEvent.target === e.originalEvent.currentTarget) {
-				console.log(e)
 				e.preventDefault();
 				$('#worksSourceFilter').val('').trigger('input');
 			}
@@ -2519,23 +2221,23 @@ index: - ${i} -`)) {
 	}
 
 
-	{
-		let t = true;
-		$('#sort').on('click', e => {
-			$('#works tr').sort((a, b) => {
-				if (t) {
-					a = $(a).find('.source').text().length;
-					b = $(b).find('.source').text().length;
-				} else {
-					a = parseInt($(a).find('.no').text());
-					b = parseInt($(b).find('.no').text());
-				}
-				return a > b ? 1 : (a < b ? -1 : 0);
-			}).detach().appendTo('#works');
-			t = !t;
-			$('#sort').find('span').last().text((t ? '길이' : '순서') + '배열');
-		});
-	}
+	// {
+	// 	let t = true;
+	// 	$('#sort').on('click', e => {
+	// 		$('#works tr').sort((a, b) => {
+	// 			if (t) {
+	// 				a = $(a).find('.source').text().length;
+	// 				b = $(b).find('.source').text().length;
+	// 			} else {
+	// 				a = parseInt($(a).find('.no').text());
+	// 				b = parseInt($(b).find('.no').text());
+	// 			}
+	// 			return a > b ? 1 : (a < b ? -1 : 0);
+	// 		}).detach().appendTo('#works');
+	// 		t = !t;
+	// 		$('#sort').find('span').last().text((t ? '길이' : '순서') + '배열');
+	// 	});
+	// }
 
 
 	// 编辑下一个空格子
@@ -2621,53 +2323,6 @@ index: - ${i} -`)) {
 	// wr.start()
 
 
-	$(document).on('blur', '#works .target', function (e) {
-		let r = SM.range;
-		SM.lastTargetRange = r;
-	});
-
-
-
-
-	function numCheck(s, t) {
-		let numRE = /[\+\-]?\d+(,\d{3})*(\.\d+)?(?:[Ee][\+\-]?\d+)?%?/g;
-		// let s='1,001291 asfas  0.12  100,1000,00.0'
-		// let t='asfas  0.12  100,1000,00.0  1,00129'
-
-		let sa = s.match(numRE)
-		let ta = t.match(numRE)
-
-		// console.log(sa);
-		// console.log(ta);
-
-		function clac(sa, ta) {
-			sa = sa || [];
-			ta = ta || [];
-			let r = {}
-			if (sa.length === ta.length) {
-				if (sa.join('\u200c') === ta.join('\u2000c')) {
-					r.done = true;
-					return r;
-				} else {
-					r.done = false;
-				}
-			}
-			sa.forEach((e, i) => {
-				let index = ta.indexOf(e);
-				if (index !== -1) {
-					delete ta[index];
-					delete sa[i];
-				}
-			});
-			sa = sa.filter(e => e !== undefined);
-			ta = ta.filter(e => e !== undefined);
-			return { sa, ta }
-		}
-
-		// console.log(clac(sa,ta))
-		return clac(sa, ta);
-	}
-
 	// function splitLongSource(s) {
 	// 	let r = /(?!\d)\s*(?:\.|\?|\!)\s*(?!\d)|{\\r\\n}|\\n/g;
 	// 	let a1 = s.split(r);
@@ -2709,9 +2364,15 @@ index: - ${i} -`)) {
 		});
 
 		// 下方格子向上合并(Ctrl+E)
+		let match100Timeout
 		$(window).on('keydown', e => {
+			/* 
+			t  当前译文
+			p  当前译文的父级
+			pn 下一个父级
+			 */
 			let t = $(e.target), p = $(t).parent(), pn = p.next();
-			if (e.keyCode === 69 && e.ctrlKey) {
+			if (e.keyCode === 69 && e.ctrlKey) {// CTRL+E
 				e.originalEvent.preventDefault();
 				if (t.is('.target') && p.is('.split') && pn.is('.split')) {
 					let s = p.find('.source');
@@ -2720,96 +2381,24 @@ index: - ${i} -`)) {
 
 					let tn = pn.find('.target');
 					t.text(t.text() + tn.text());
+					t.focus()
 					pn.remove();
 				}
-				t.trigger({ type:'keydown', keyCode: 19, code:'Pause' })
-				// match100($('.currentEditRow .target'))
+				t.trigger({ type: 'keydown', keyCode: 19, code: 'Pause' })
+				clearTimeout(match100Timeout)
+				match100Timeout = setTimeout(() => {
+					match100($('.currentEditRow .target'))
+				}, 2000);
 			}
 		});
 	}
 
 
 
-	{
-		// 让单按Alt键失效（否则总会失真）
-		$(window).on('keyup', e => {
-			disableAlt.call(e);
-		});
-
-		function disableAlt() {
-			// this === KeyboardEvent
-			if (this.keyCode) this.preventDefault();
-		}
-	}
-
-
-	// function parseComment() {
-	// 	let comments = $('#works .comment').filter((i, e) => $(e).text().length);
-
-	// 	comments.each((i, e) => {
-	// 		let comment = $(e);
-	// 		let parent = comment.parent();
-	// 		let source = parent.find('.source');
-	// 		let s = source.text();
-
-	// 		comment.text().split(',').forEach(e => {
-	// 			let [k, v] = e.split(':', 2);
-	// 			s = s.replace(k, v);
-	// 		});
-
-	// 		source.text(s).css('background', '#ffc');
-	// 	});
-	// }
-
-
-	// {
-	// 	setTimeout(() => {
-	// 		let db = localforage.createInstance({name:'test'});
-	// 		dict.array.forEach(function(st){
-	// 			let source = st[0];
-	// 			let target = st[1];
-	// 			let key;
-
-	// 			key = sha256(source);
-	// 			db.setItem(key, source);
-	// 			console.log(key)
-
-	// 			key = sha256(target);
-	// 			db.setItem(key, target);
-	// 			console.log(key)
-	// 		});
-
-	// 		db.getItem()
-
-	// 		console.log('ok');
-	// 	}, 2000);
-
-	// }
-
-
-	// {
-	// 	// test speed
-	// 	let isDebug = localStorage.getItem('isDebug');
-	// 	if(isDebug){
-	// 		let tm = localforage.createInstance({name:'tm'});
-	// 		tm.getItem(location.search+'dict', function(err,e){
-	// 			console.log(e);
-	// 		});
-
-	// 		// store
-	// 		let s = localforage.createInstance({name:'tim', storeName:'test'});
-
-
-
-
-
-	// 		s.keys().then(v=>console.log(v));
-
-	// 		// s.dropInstance()
-
-	// 	}
-	// }
-
+	// 让单按Alt键失效（否则总会失真）
+	window.addEventListener('keyup', function (e) {
+		e.preventDefault()
+	})
 
 
 	// 点击关闭原来的窗口
@@ -2821,7 +2410,6 @@ index: - ${i} -`)) {
 		});
 	}
 
-
 	let w;
 	{
 		!function () {
@@ -2829,13 +2417,11 @@ index: - ${i} -`)) {
 			let debug = localStorage.getItem('debug');
 			if (!debug) return;
 			// console.warn(debug);
-
 			w = new Worker('./dict-worker.js');
 			w.addEventListener('message', function (e) {
 				// console.log(e.data);
 				// console.timeEnd(e.data.type);
 			});
-
 			function remove(source) {
 				// console.time('remove');
 				w.postMessage({ type: 'remove', source });
@@ -2892,6 +2478,9 @@ index: - ${i} -`)) {
 
 });
 
+
+
+// 【】
 function cnEncode(s, tips) {
 	let ts = {}, source = s, space = s, t;
 
@@ -2902,7 +2491,12 @@ function cnEncode(s, tips) {
 			ts[i] = e[1]
 		}
 	})
-	space = space.replace(/\\n|\\t|[\~\!\@\#\$\%\^\&\*\(\)\_\+\`\-\=\[\]\\\;\'\,\.\/\{\}\|\:\"\<\>\?]/g, '').replace(/\p{Number}|\p{Mark}/gu, '').replace(/\s/g, '')
+	space = space.replace(/\s+/g, '')
+		.replace(/\\n+/g, '')
+		.replace(/\\t+/g, '')
+		.replace(/[\~\!\@\#\$\%\^\&\*\(\)\_\+\`\-\=\[\]\\\;\'\,\.\/\{\}\|\:\"\<\>\?]+/g, '')
+		.replace(/\p{Number}/gu, '')
+		.replace(/\p{Mark}/gu, '')
 	if (space.length == 0) {
 		t = source
 		for (let i in ts) {
@@ -2941,7 +2535,11 @@ function dmpMatch() {
 	// let st = s.text()
 	let st = $('#works .currentEditRow').find('.source').text()
 	let dmp = new diff_match_patch()
-	return red.map(e => e.concat(dmp.diff_main(e[0], st)))
+	return red.map(e => {
+		let diff = dmp.diff_main(e[0], st)
+		dmp.diff_cleanupSemantic(diff)
+		return e.concat(diff)
+	})
 }
 function red() {
 	return $('#tips tr').toArray().map(function (tr) {
@@ -2960,7 +2558,7 @@ function blue() {
 		return {
 			source: tr.find('.source').text(),
 			target: tr.find('.target').text(),
-			similar: parseFloat(tr.find('.similar').text())
+			similar: parseFloat(tr.find('.similar').text()),
 		}
 	})
 }
@@ -2973,8 +2571,9 @@ function collector(dicts) {
 		dicts.forEach((e, i, a) => {
 			if (index === i) return;
 			let sd = dmp.diff_main(source, e.source)
+			dmp.diff_cleanupSemantic(sd)
 			let td = dmp.diff_main(target, e.target)
-
+			dmp.diff_cleanupSemantic(td)
 			let sa = { '-1': new Set(), '1': new Set(), '0': new Set() }
 			let ta = { '-1': new Set(), '1': new Set(), '0': new Set() }
 			sd.forEach(e => sa[e[0]].add(e[1]))
@@ -3039,7 +2638,9 @@ function collectorTips() {
 
 function kkv(k, kv) {
 	let dmp = new diff_match_patch()
-	let r = dmp.diff_main(kv.source || kv[0], k).filter(e => e[0] !== 0)
+	let r = dmp.diff_main(kv.source || kv[0], k)
+	dmp.diff_cleanupSemantic(r)
+	r = r.filter(e => e[0] !== 0)
 	let l = r.length
 	if (l === 2 && r[0][0] === -1 && r[1][0] === 1) {
 		// console.log(r[0][1])
@@ -3094,18 +2695,25 @@ function splitLong(tar) {
 		tar.addClass('splitTarget').empty();
 		tar.attr({ name })
 		// tar.parent().addClass('hide')// 20190306
-		let first;
+		let first, tr, no, s, t;
 		res.forEach((e, i) => {
-			let tr = $(`<tr class="split">`).appendTo('#works');
-			let no = $('<td class="no">').text(i + 1).appendTo(tr);
-			let s = $('<td class="source">').text(e).appendTo(tr)
-			let t = $('<td class="target" contenteditable="plaintext-only">').appendTo(tr);
+			tr = $(`<tr class="split">`).appendTo('#works');
+			no = $('<td class="no">').text(i + 1).appendTo(tr);
+			s = $('<td class="source">').text(e).appendTo(tr)
+			t = $('<td class="target" contenteditable="plaintext-only">').appendTo(tr);
 			$('<td class="name">').appendTo(tr).attr({ originalname: name })
-			if (i === 0) first = t;
-			if (e.trim() === '') tr.addClass('hide2');
-			else if (e.indexOf('\\n') > -1) {
+			if (i === 0) {
+				first = t
+			}
+			e = e.trim()// 清除空白（包括换行）
+			if (e === '') {
+				tr.addClass('hide2')
+			} else if (e === '\\n') {
 				t.text(e);
 				tr.addClass('hide2');
+			} else if (/^[,，、。]$/.test(e)) {
+				t.text(e)
+				tr.addClass('hide2')
 			}
 		});
 		let w = document.getElementById('works');
@@ -3125,45 +2733,101 @@ function splitLongSource(str) {
 	ss.split(/\(.+\)/u)
 	// ss.split(/(?=(?!\d)\.)/)
 	ss.split(/.+?(\!\?|\?\!|\?|\!|\.)+(\s*)/)
-
+	ss.split(/(\s*),(\s*)/)
 
 	return ss.s.map(e => (e instanceof StringSplitterDelimiter) ? e.value : e)
 }
 
+
+
+// 屏幕显示提示，但需要对超出屏幕时显示进行优化。
 function showTip(opt) {
+	// opt  { name, html, text, animate, delay }
 	if (opt === undefined || opt === null) return;
+
 	let type = typeof opt;
 	if (type !== 'object') {
 		opt = { text: opt };
 	}
-	let ui;
-	ui = $('<div></div>').appendTo('body').fadeIn().css({
+
+	let $ui;
+	// 如果opt提供了名称，则该提示窗将是唯一的提示，并常驻在页面中。
+	let { name } = opt
+	if (name) {
+		name = name.replace(/\W+/g, '')
+		$ui = $(`div[name="tip-${name}"]`)
+
+		if ($ui.length === 1) {
+			// 已有一个
+		} else if ($ui.length < 1) {
+			// 新建一个
+			$ui = $('<div></div>').appendTo('body')
+			$ui.attr({ name: `tip-${name}` })
+		} else if ($ui.length > 1) {
+			// 删除多余
+			$ui.slice(1).remove()
+		}
+	} else {
+		$ui = $('<div></div>').appendTo('body')
+	}
+
+	$ui.fadeIn().css({
 		position: 'fixed',
 		left: opt.x || 0,
 		top: opt.y || 0,
 		zIndex: 999
 	}).css(Object.assign({
 		margin: 0,
-		padding: 6,
-		border: '2px solid #000',
-		background: '#fffe',
-		color: '#000',
-		borderRadius: 6,
-		fontWeight: 'bold'
+		padding: '1em 3px 3px 3px',
+		borderRadius: '1em 1em 0 0',
+		background: 'white',
+		color: 'black',
+		border: '1px solid black',
+		borderBottomWidth: '2px',
 	}, opt.css));
-	if (opt.html) ui.html(opt.html);
-	else if (opt.text) ui.text(opt.text);
+
+	if (opt.html) {
+		// 删除script标签
+		$ui.html($('<div>').html(opt.html).find('script').remove().end());
+	} else if (opt.text) {
+		$ui.text(opt.text)
+	}
+
 	if (opt.animate) {
 		if (Array.isArray(opt.animate)) {
 			opt.animate.forEach(e => {
-				ui = ui.animate(e);
+				$ui = $ui.animate(e);
 			});
 		} else {
-			ui = ui.animate(opt.animate);
+			$ui = $ui.animate(opt.animate);
 		}
 	}
-	ui.delay(opt.delay || 3000).fadeOut(() => ui.remove());
-	return ui;
+
+	if (name && opt.delay < 0) {
+		function onkeydown(e) {
+			if (
+				(e.keyCode === 27 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) ||
+				(e.keyCode === 13 && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) ||
+				(e.keyCode === 9)
+			) {
+				$(document).off('keydown', '#works .target', onkeydown)
+				$ui.fadeOut()
+			}
+		}
+		$(document).on('keydown', '#works .target', onkeydown)
+
+		// function onblur(e) {
+		// 	$(document).off('blur', onblur)
+		// 	$ui.fadeOut()
+		// }
+		// $(document).on('blur', '#works .target', onblur)
+		// 不需要这么做，只要上面的键盘侦听即可。
+		// 回车13时，由于提交数据，所以可以消除了。
+		// Esc27时，视为用户希望取消
+	} else {
+		$ui.delay(opt.delay || 3000).fadeOut(() => $ui.remove())
+	}
+	return $ui
 }
 
 
@@ -3192,153 +2856,9 @@ function chars(start, end) {
 let searchRE = '^\\/<>()[-]?*+{,}.:=!|$'.split('').map(c => '\\' + c)
 
 
-// F1 卡顿的 match100()
-/* 
-
-function match100(range) {
-	var o = {};
-	dict.array.forEach(function (e) {
-		// 去掉左右空白后，再整理出键值对。
-		e[0] = String(e[0]).trim();
-		e[1] = String(e[1]).trim();
-		if (e[0] && e[1]) {
-			o[e[0]] = e[1];
-		}
-	});
-
-	let b = Boolean(range)
-	if (!b) {
-		range = $('#works').find('tr').not('.hide').not('.hide2').not('.emptyRow').filter((_, e) => !$(e).find('.target').is('.splitTarget'))
-	}
-	range.find('.target').removeClass('done doneAuto doneAutoSpace doneAutoNumber doneAutoSmart').empty()
-
-	// if (clickEvent.shiftKey) {
-	// 	range = range.filter('.split')
-	// }
-	// if (clickEvent.ctrlKey) {
-	// 	range = range.find('.target').not('.done').not('.doneAuto').not('.doneAutoSpace').not('.doneAutoNumber').not('.doneSmart').not('.splitTarget').parent()
-	// }
-	range.each(function (i, tr) {
-		let s, t, st;
-
-		if (!b) {
-			s = $(tr).find('.source');
-			t = $(tr).find('.target');
-
-		} else {
-			t = range
-			s = range.parent().find('.source')
-
-		}
-		st = s.text().replace(/\{\\r\\n\}/g, '\\n').trim();
-		// console.log(s, t, st)
-		pushlog('[채우기] ' + st)
-
-		// 直接找到一致内容。
-		if (st in o) {
-			// t  需要填充的该target单元格
-			// ot t单元格的当前内容
-			// tt 需要填充的100%匹配的最新内容
-			let ot, tt;
-			ot = t.text();
-			tt = o[st];
-			// 已经填好的内容与100%内容一致时，直接退出操作。
-			if (ot === tt) return t.removeClass('done doneAuto doneAutoSpace doneAutoNumber doneSmart').addClass('done');
-			// if (clickEvent.altKey) return t.parent().remove();
-			return t.text(tt).removeClass('done doneAuto doneAutoSpace doneAutoNumber doneSmart').addClass('doneAuto');
-		}
-
-		// 如果没有直接找到一致内容，则需要只能匹配了。
-		// 智能忽略空格匹配
-		if (st.length === 0) { return; }
-		var regexp = new RegExp('^' + Search.getRegExp(st).source + '$');
-		for (var k in o) {
-			if (regexp.test(k)) {
-				// 找到一致内容
-				// if (clickEvent.altKey) return t.parent().remove();
-				return t.text(o[k]).removeClass('done doneAuto doneAutoSpace doneAutoNumber doneSmart').addClass('doneAutoSpace');// 淡灰色
-			}
-		}
-
-		// 数值匹配
-		{
-			let result = '', accepted, p;
-			let regExp = ArgText.numberRegExp;
-			let stNoNumber = st.replace(regExp, '');
-			if (regExp.test(st)) {
-				let arr = dict.array;
-				arr.forEach(e => {
-					let s = e[0], t = e[1];
-					if (regExp.test(s)) {
-						let sNoNumber = s.replace(regExp, '');
-						if (sNoNumber === stNoNumber) {
-							p = ArgText.makeTextPair(s, t);
-							let stMade = ArgText.makeText(st);
-							accepted = p.a.args.length === stMade.args.length
-							if (accepted) {
-								result = p.make(stMade.args);
-							}
-							return accepted;
-						}
-					}
-				});
-
-				if (accepted) {
-					t.text(result).removeClass('done doneAuto doneAutoSpace doneAutoNumber doneSmart');
-					if (p.accepted) {
-						t.addClass('doneAutoNumber');
-					} else {
-						t.addClass('doneSmart');
-					}
-					return;// 不要继续往下执行。
-				}
-			}
-		}
-
-		// 一个词的替换
-		{
-			if (dict.search(st, 80).some(kv => {
-				let tt = kkv(st, kv)
-				if (tt) {
-					t.text(tt).addClass('doneAutoNumber')
-					return true
-				}
-			})) {
-				return;
-			}
-			// let s = $(tr).find('.source');
-			// let t = $(tr).find('.target');
-			// let st = s.text().replace(/\{\\r\\n\}/g, '\\n').trim();
-		}
-
-
-
-		// 只能忽略数字英文符号等的匹配。
-		var filterRegExp = /[\x00-\xff]/g, _k, _v;
-		for (var k in o) {
-			_k = k.replace(filterRegExp, '');
-			if (_k == st.replace(filterRegExp, '')) {
-				let v = smartMatch(st, [k, o[k]]);
-				t.text(v).addClass('doneSmart');// 红色
-				return;
-			}
-		}
-
-		// 实在是没有找到，需要做最后的处理。
-		// 按下ctrl时，保留原来内容。按下alt时，删除找到的内容。找到内容时，自动替换背景颜色为灰色。
-		// if (!clickEvent.ctrlKey) {
-		// 	t.text('').removeAttr('style');
-		// }
-	});
-}
-
- */
-
-
-
+// 【自动填入译文】
 let match100workers = {}
 let match100fns = []
-
 function match100chain(fns, callback) {
 	match100fns = match100fns.concat(fns)
 	match100run()
@@ -3349,8 +2869,10 @@ async function match100run() {
 		await fn()
 	}
 }
-
 function match100(range) {
+	warn('call match100()')
+	// log('match100 start', match100fns.length)
+	// range     jqueryInstance
 	let _;
 	// let trimRegExp = /^\s+|\s+$/
 	// _ = array.filter(([source, target])=>{
@@ -3377,36 +2899,154 @@ function match100(range) {
 
 
 	// 测试
-
-	let b = Boolean(range && range.length)
+	let b = Boolean(range && range.length > 0)
 	if (!b) {
-		range = $('#works').find('tr').not('.hide').not('.hide2').not('.emptyRow').filter((_, e) => !$(e).find('.target').is('.splitTarget'))
+		range = $('#works tr').not('.hide').not('.hide2').not('.emptyRow').filter((_, e) => !$(e).find('.target').is('.splitTarget'))
 	}
 	range.find('.target').removeClass('done doneAuto doneAutoSpace doneAutoNumber doneAutoSmart').empty()
 
 	match100fns = []
-	let fns = range.toArray().filter(tr => $(tr).find('.source').text().trim()).map(tr => clac.bind(this, tr))
-	if(fns.length) match100chain(fns)
+	let fns = range.toArray().filter(tr => $(tr).find('.source').text().trim()).map(tr => {
+		return clac.bind(this, tr)
+	})
+	if (fns.length) match100chain(fns)
 
 	function clac(tr) {
 		return new Promise((resolve) => {
 			let s, t, st, worker, objectId = ObjectID().str;
-
-			if (!b) {
-				s = $(tr).find('.source');
-				t = $(tr).find('.target');
-
-			} else {
-				s = range.find('.source')
-				t = range.find('.target')
-
-			}
+			s = $(tr).find('.source');
+			t = $(tr).find('.target');
+			// log(b,s,t,tr)
 			st = s.text().replace(/\{\\r\\n\}/g, '\\n').trim();
 			t.addClass('wait')
 
+			// cacheWorker
 			worker = cacheWorker('match100', function () {
 				// ArgText
-				{ let e = this; e = "object" == typeof window ? window : "object" == typeof global ? global : this; let t = /\d{1,3}(,?\d{3})*(\.\d+(e(-?)\d+)?)?/g; function makeTextPair(e, t, r = "{") { let n, a, o; n = makeText(e), a = makeText(t); let d = reIndexs(n.args, a.args), c = 0; return o = a.tagText.replace(/((\{\{)*\{)(\d+)(\})/g, function (e, t, r, n, o) { return n = void 0 === (n = d[c]) ? void 0 === a.args[c] ? "" : a.args[c] : `${t}${n}${o}`, c++ , n }), { a: n, b: a, tagText: o, accepted: d.accepted, make: function (e, t = !0) { return makeArgs(t ? this.tagText : this.b.tagText, e) } } } function reIndexs(e, t) { let r, n, a, o; for (t = Array.from(t), r = 0, (n = e.length) ? (o = []).accepted = !0 : o.accepted = !1; r < n; r++)-1 == (a = t.indexOf(e[r])) ? o.accepted = !1 : (t[a] = null, o.push(a)); return o } function encodeReady(e, t = "{") { let r = new RegExp(t.split("").map(e => "\\" + e).join(""), "g"); return e.replace(r, "$&$&") } function decodeReady(e, t = "{") { let r = new RegExp("(" + t.split("").map(e => "\\" + e).join("") + ")\\1", "g"); return e.replace(r, t) } function makeText(e, r = "{") { let n, a = 0, o = []; return { text: e, tagText: n = (n = encodeReady(e, r)).replace(t, function (e) { return o.push(e), `{${a++}}` }), args: o } } function makeArgs(e, t) { if ("string" != typeof e) return ""; let r, n; return n = /\{([^\}]+?)\}/g, (r = (r = e.split("{{")).map(function (e) { return e.replace(n, function (e, r) { let n = t[r]; return null == n && (n = e), n }) })).join("{{") } e.ArgText = { numberRegExp: t, makeArgs: makeArgs, makeText: makeText, makeTextPair: makeTextPair, encodeReady: encodeReady, decodeReady: decodeReady, reIndexs: reIndexs }, "object" == typeof module ? module.exports = ArgText : this.ArgText = ArgText }
+				!function (undefined) {
+					// 数值正则
+					let numberRegExp = /[+-]?\d{1,3}(,?\d{3}|\d+)*(\.\d+)?(e[+-]?\d+)?|\p{Number}+/gu
+					// let numberRegExp = /[\+\-]?[\p{Number}\.,eE%]+/gu;
+
+					function makeTextPair(t1, t2, mark = '{') {
+						let mt1, mt2, tagText;
+
+						mt1 = makeText(t1);
+						mt2 = makeText(t2);
+						console.warn(mt1)
+						console.warn(mt2)
+
+						let indexs = reIndexs(mt1.args, mt2.args);
+						let i = 0;
+
+						tagText = mt2.tagText.replace(/((\{\{)*\{)(\d+)(\})/g, function (m, begin, _, number, end) {
+							number = indexs[i];
+							number = (number === undefined) ? (mt2.args[i] === undefined ? '' : mt2.args[i]) : `${begin}${number}${end}`;
+							i++;
+							return number;
+						});
+
+						function make(args, reIndex = true) {
+							return reIndex ? makeArgs(this.tagText, args) : makeArgs(this.b.tagText, args);
+						}
+						return { a: mt1, b: mt2, tagText, accepted: indexs.accepted, make };
+					}
+
+					// 得出将a1排列成a2的index序列。例如： [1,11,111]->[111,1,11] 结果为 [1, 2, 0]
+					function reIndexs(a1, a2) {
+						a2 = Array.from(a2);
+						let i, len, index, indexs;
+						i = 0;
+						len = a1.length;
+						if (len) {
+							indexs = [];
+							indexs.accepted = true;
+						} else {
+							indexs.accepted = false;
+						}
+						for (; i < len; i++) {
+							index = a2.indexOf(a1[i])
+							if (index == -1) {
+								indexs.accepted = false;
+							} else {
+								a2[index] = null;
+								indexs.push(index);
+							}
+						}
+						return indexs;
+					}
+
+					// 如果字符串中带有mark，那就要加上mark。即{变为{{。
+					function encodeReady(text, mark = '{') {
+						let markRegExp = new RegExp(mark.split('').map(e => '\\' + e).join(''), 'g');
+						return text.replace(markRegExp, '$&$&');
+					}
+
+					// 如果字符串中带有mark，那就要减去mark。即{{变为{，但{不会消失。
+					function decodeReady(text, mark = '{') {
+						let markRegExp = new RegExp('(' + mark.split('').map(e => '\\' + e).join('') + ')\\1', 'g');
+						return text.replace(markRegExp, mark);
+					}
+
+					// 单个
+					function makeText(text, mark = '{') {
+						let i = 0, args = [], tagText;
+						tagText = encodeReady(text, mark);
+						tagText = tagText.replace(numberRegExp, function (m) {
+							args.push(m);
+							return `{${i++}}`;
+						});
+						return { text, tagText, args };
+					}
+
+					// 将args中的内容应用到文本中的{0},{1}...{n}参数。
+					function makeArgs(str, args) {
+						// 但愿是字符串
+						if (typeof str !== 'string') return '';
+
+						let s, regexp;
+						regexp = /\{([^\}]+?)\}/g;
+
+						// 在这里{为转义符，遇到{{须进行回避
+						s = str.split('{{');// 回避{{符号
+						s = s.map(function (str) {
+							return str.replace(regexp, function (match, name) {
+								let v = args[name];
+								if (v === undefined || v === null) v = match;
+								// console.debug(v !== match ? 替换成功：${match}-->${v}: 保留原样：${match});
+								return v;
+							});
+						});
+						return s.join('{{');
+					}
+
+
+					// 导出以上内容
+					let g;
+					if (typeof window === 'object') {
+						g = self;
+					} else if (typeof global === 'object') {
+						g = global;
+					} else {
+						g = this;
+					}
+					g.ArgText = {
+						numberRegExp,
+						makeArgs,
+						makeText,
+						makeTextPair,
+						encodeReady,
+						decodeReady,
+						reIndexs,
+					};
+
+					// 兼容chrome和nodejs
+					if (typeof module === 'object') {
+						module.exports = ArgText;
+					} else {
+						this.ArgText = ArgText;
+					}
+				}();
 				// Search
 				class Search { constructor(e) { this.input = e } test(e) { var t = Search.getRegExp(e); return this.response = t.test(this.input) } replace(e, t) { var r = this.regExp = Search.getRegExp(e, "g"); return this.response = this.input.replace(r, t) } static getRegExp(e, t, r) { if (e) { if (r) try { return e = new RegExp(e, "g") } catch (t) { console.warn("Invalid argument - new RegExp(" + e + ',"g")') } return e = e.split("\\"), e = "(?:)" === (e = new RegExp(e.map(Search._getRegExp).join("\\\\"), t)).source ? Search.VIRTUAL_REGEXP : e } } static _getRegExp(e) { if ("" === (e = e.replace(Search.REGEXP_SPACES, ""))) return ""; var t = Search.SPACES; return t + e.split("").map(function (e) { return e.replace(Search.REGEXP_TOKENS, "\\$&") }).join(t) + t } static lenSearch(e, t) { if (!t) return []; let r, n, a = e.length, c = 0, s = a, i = 0, E = !1; for (; s !== c;)r = e.slice(c, s), (E = dict.some((e, t, E) => !!(n = new RegExp("^" + Search._getRegExp(r) + "$", "gi")).test(e[0]) && (i = t, c = s, s = a, !0))) ? console.log("[has]", dict[i]) : s-- } } Object.defineProperties(Search, { REGEXP_TOKENS: { value: /[\/\?\*\+\-\^\$\(\)\<\>\[\]\{\}\.\,\:\&\|]/g }, REGEXP_SPACES: { value: /\s+/g }, SPACES: { value: "\\s*" }, VIRTUAL_REGEXP: { value: { test: function () { return !1 }, match: function () { return null } } } });
 				// similar
@@ -3565,11 +3205,40 @@ function match100(range) {
 
 				// smartMath
 				function smartMatch(source, sourceTargetArray, dict) {
-					log(sourceTargetArray)
 					var ret = '';
 					var o = strDiff(source, sourceTargetArray[0]);
 					var d1 = o.diff1, d2 = o.diff2, len1 = d1.length, len2 = d2.length, d1Value, d2Value;
 					var regexp = /^[\x01-\xff]+$/;
+
+					let dmp = new diff_match_patch();
+					// let diff = dmp.diff_main(sourceTargetArray[0], source)
+					// dmp.diff_cleanupSemantic(diff)
+					// let dmpHTML = dmp.diff_prettyHtml(diff)
+					let dmpPatch = dmp.patch_make(sourceTargetArray[0], source);
+					if (dmpPatch.length === 1) {
+						let e = dmpPatch[0];
+						let a = e.diffs
+						let b = a.every((row) => row[0] !== '-1')
+						if (b) {
+							let r = a.map((row) => {
+								if (row[0] === 0) {
+									let m = dict.search(row[1], 100)
+									if (m && m.length) {
+										return m[0][1]
+									} else {
+										return ''
+									}
+									log(m)
+								} else if (row[0] === 1) {
+									return row[1]
+								}
+							})
+							log(r)
+							return r.join(' ')
+						}
+					}
+
+
 					if (len1 === len2) {// 不同点个数一样
 						var startResult = [];
 						startResult.push('⁉ Replace');
@@ -3664,6 +3333,10 @@ function match100(range) {
 						startResult.push('[*]' + d1.join('|') + ' <- ' + d2.join('|'));
 						// ❌💯‼️⁉️
 					}
+					// console.log({ type: 'test', ret, source, sourceTargetArray })
+					// postMessage({type:'test', ret, source, sourceTargetArray })
+					// postMessage({name:'test', data:Date.now()})
+
 					return ret;
 				}
 				function strDiff(str1, str2, separator) {
@@ -3719,15 +3392,22 @@ function match100(range) {
 				};
 
 				function run(dict, st, o) {
+					/* 
+					@dict    []
+					st       sourceText
+					o        {source:target, ...}
+					*/
 					if (st in o) {
 						// t  需要填充的该target单元格
 						// st t单元格的当前内容
 						// tt 需要填充的100%匹配的最新内容
 						let tt = o[st]
 						// 已经填好的内容与100%内容一致时，直接退出操作。
-						if (st === tt) return { removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass: 'done' };
+						if (st === tt) return { text: tt, removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass: 'doneAuto' };// 相等内容
 						// if (clickEvent.altKey) return t.parent().remove();
-						return { text: tt, removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass: 'doneAuto' };
+						let addClass = 'doneAuto'
+						log(addClass)
+						return { text: tt, removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass };// 已有内容
 					}
 
 					// 如果没有直接找到一致内容，则需要只能匹配了。
@@ -3738,35 +3418,47 @@ function match100(range) {
 						if (regexp.test(k)) {
 							// 找到一致内容
 							// if (clickEvent.altKey) return t.parent().remove();
-							return { text: o[k], removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass: 'doneAutoSpace' };// 淡灰色
+							let addClass = 'doneAutoSpace'
+							log(addClass)
+							return { text: o[k], removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass };// 淡灰色
 						}
 					}
 
 					// 数值匹配
 					{
-						let result = '', accepted, p;
-						let regExp = ArgText.numberRegExp;
+						let result = '', accepted = false, p;
+						let regExp = ArgText.numberRegExp
 						let stNoNumber = st.replace(regExp, '');
 						if (regExp.test(st)) {
+							// log('숫자매칭1')
 							let arr = dict.array;
 							arr.some(e => {
 								let s = e[0], t = e[1];
 								if (regExp.test(s)) {
+									// log('숫자매칭2')
 									let sNoNumber = s.replace(regExp, '');
 									if (sNoNumber === stNoNumber) {
 										p = ArgText.makeTextPair(s, t);
 										let stMade = ArgText.makeText(st);
-										accepted = p.a.args.length === stMade.args.length
+										// accepted = p.a.args.length === stMade.args.length
+										// accepted = p.a.args.length === stMade.args.length || p.accepted
+										accepted = p.accepted
+										log(JSON.stringify({ p, stMade }))
 										if (accepted) {
 											result = p.make(stMade.args);
 										}
-										return accepted;
+										// log('숫자매칭3',accepted, p, result)
 									}
 								}
+								return accepted
 							});
 
+
 							if (accepted) {
-								return { text: result, removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass: p.accepted ? 'doneAutoNumber' : 'doneSmart' };// 不要继续往下执行。
+								// log('숫자매칭3',accepted, result)
+								let addClass = p.accepted ? 'doneAutoNumber' : 'doneSmart'
+								log(addClass)
+								return { text: result, removeClass: 'done doneAuto doneAutoSpace doneAutoNumber doneSmart', addClass };// 不要继续往下执行。
 							}
 						}
 					}
@@ -3781,7 +3473,9 @@ function match100(range) {
 								console.warn(err)
 							}
 							if (tt) {
-								return { text: tt, addClass: 'doneAutoNumber' }
+								let addClass = 'doneAutoNumber'
+								log(addClass)
+								return { text: tt, addClass }
 							}
 						})) {
 							return {};
@@ -3796,7 +3490,9 @@ function match100(range) {
 						_k = k.replace(filterRegExp, '');
 						if (_k == st.replace(filterRegExp, '')) {
 							let v = smartMatch(st, [k, o[k]], dict);
-							return { text: v, addClass: 'doneSmart' };
+							let addClass = 'doneSmart'
+							log(addClass)
+							return { text: v, addClass };
 						}
 					}
 
@@ -3808,21 +3504,26 @@ function match100(range) {
 					return {}
 				}
 			},
-			function (data) {// 自动匹配后执行的操作
-				if (data) {
-					let { text, addClass, removeClass } = data
+				function (data) {// 自动匹配后执行的操作
+					if (data) {
+						let { text, addClass, removeClass } = data
 
-					if (Reflect.has(data, 'text')) t.text(text)
-					if (Reflect.has(data, 'removeClass')) t.removeClass(removeClass)
-					if (Reflect.has(data, 'addClass')) t.addClass(addClass)
-					// if (text) log(st, text)
-				}
-				t.removeClass('wait')
-				worker.terminate()
-				delete match100workers[objectId]
-				resolve()
-				if(match100fns.length===0) t.focus()// 激活焦点 2019.03.22
-			})
+						if (Reflect.has(data, 'text')) t.text(text)
+						if (Reflect.has(data, 'removeClass')) t.removeClass(removeClass)
+						if (Reflect.has(data, 'addClass')) t.addClass(addClass)
+						// if (text) log(st, text)
+					}
+					t.removeClass('wait')
+					worker.terminate()
+					delete match100workers[objectId]
+					resolve()
+					if (match100fns.length === 0) {
+						let last = t.last()
+						last.focus()// 激活焦点 2019.03.22
+						// log(last[0])
+						SM.s.selectAllChildren(last[0])// 选取内容
+					}
+				})
 			worker.postMessage({ array, st, o })
 			match100workers[objectId] = worker
 		})
@@ -3835,23 +3536,28 @@ function match100(range) {
 
 
 
-
-
-
-
-
-
-
-// ddb-move-new
-function pushlog() {
-	var clog = createCustomLog.apply(null, arguments);
+// 【插入日志】
+let clogs = document.querySelector('#clogs')
+function pushlog(...args) {
+	let clog = createCustomLog.apply(null, args)
 	if (clog) {
-		clog.prependTo('#clogs');
+		clogs.insertAdjacentElement('afterbegin', clog)
+		let { bottom } = clogs.getBoundingClientRect();
+		Array.from(clogs.children).forEach((node, i) => {
+			if (i > 10) node.remove();
+		});
 	}
 }
-
 function pushloghtml(v) {
-	$(`<p class="clog">`).prependTo(`#clogs`).html(v);
+	let clog = document.createElement('p');
+	clog.classList.add('clog');
+	clog.innerHTML = v;
+	clogs.insertAdjacentElement('afterbegin', clog);
+	let { bottom } = clogs.getBoundingClientRect();
+	Array.from(clogs.children).forEach((node,i) => {
+		if(i>10) node.remove();
+	});
+	return $(clog);
 }
 // arg为string时，视为信息。arg为object时，视为css。
 function createCustomLog(...args) {
@@ -3860,7 +3566,8 @@ function createCustomLog(...args) {
 	if (length === 0) {
 		return;
 	} else {
-		let tr = $('<tr class="clog"></tr>');
+		let pre = document.createElement('p');
+		pre.classList.add('clog');
 		args.forEach(e => {
 			let type = typeof e;
 			if (type === 'string' || type === 'number') {
@@ -3869,57 +3576,60 @@ function createCustomLog(...args) {
 				Object.assign(style, e);
 			}
 		});
-
 		content = contents.join('\n');
-		tr.append($('<td>').text(content).css(style));
-
-		return tr;
+		pre.textContent = content;
+		if (style) {
+			for (let k in style) {
+				pre.style[k] = style[k];
+			}
+		}
+		return pre;
 	}
 }
 
 
-// 格式化名称
+// 【格式化名称】 特别是文件名
 function formatName(n) {
 	return n.replace(/[\\\/\:\*\?\"\<\>\|\&\-\+\=\`\~\%\!\@\#\$\%\^\,\.\;\:\'\(\)\{\}\[\]\s]/g, '_');
 }
 
 
 
-// 过滤dictArray的source空格分隔数小于等于n
+// 【排除arr中source的空格数小于等于n的项】
 function filterStep(arr, n = 0) {
 	return arr.filter(function (e) {
-		var v = e[0];
+		let [v] = e
 		if (v) {
 			v = v.trim().match(/\s+/g);
 			if (v) {
-				return v.length <= n;
+				return v.length <= n// 空格个数少于等于n
 			} else {
-				return true;
+				return true// 没有空格
 			}
 		}
-		return false;
+		return false
 	});
 }
-
-// 过滤一些标签
+// 删除标签符号，重组arr
 function filterTag(arr) {
-	var rs = [], regExp = /\[[a-z0-9\-]+?\]|\{[\d+?]\}|[\(\)\[\]\{\}\<\>\"\'\`\!\！\,\，\.\。\…\?\？]|^\d+$/ig;
+	let regExp = /\[[a-z0-9\-]+?\]|\{[\d+?]\}|[\(\)\[\]\{\}\<\>\"\'\`\!\！\,\，\.\。\…\?\？]|^\d+$/ig
+	let rs = []
 	arr.forEach(function (e) {
-		var s = e[0], t = e[1];
+		let [s, t] = e
 		if (s) {
-			s = s.trim();
+			s = s.trim()
 			if (s) {
-				s = s.replace(regExp, '');
+				s = s.replace(regExp, '')
 				if (t) {
-					t = t.replace(regExp, '');
+					t = t.replace(regExp, '')
 				}
-				rs.push([s, t]);
+				rs.push([s, t])
 			}
 		}
-	});
-	return rs;
+	})
+	return rs
 }
-
+// 排除不符合长度规则的项
 function filterLength(arr, max = 16, min = 2) {
 	return arr.filter(function (e) {
 		var s = e[0];
@@ -3933,7 +3643,7 @@ function filterLength(arr, max = 16, min = 2) {
 		return false;
 	})
 }
-
+// 推测出词库。没有空格，删除标签，长度10以内的项。
 function filterDict() {
 	var rs = filterStep(dict.array, 0);
 	rs = filterTag(rs);
@@ -3941,31 +3651,50 @@ function filterDict() {
 	return rs;
 }
 
+
+// 下载文件(文件名，数据)   编码UTF-8格式
 function downloadFile(filename, content) {
+	if (! /\.txt$/i.test(filename)) filename += '.txt';
+
 	var a = document.createElement('a');
 	var blob = new Blob([content]);
 	var url = window.URL.createObjectURL(blob);
-	filename = filename + formatName(location.search) + '_' + Date.now() + '.txt';
-
 	a.href = url;
 	a.download = filename;
 	a.click();
 	window.URL.revokeObjectURL(url);
 }
 
+// 下载文件(文件名，数据)   编码UTF-16格式
+function downloadFileUcs2(filename, content) {
+	if (! /\.txt$/i.test(filename)) filename += '.txt';
+
+	content = content.replace(/\n/g, '\r\n');
+	content = punycode.ucs2.decode(content);
+	content.unshift(0xfeff);
+	content = Uint16Array.from(content);
+	let a = document.createElement('a');
+	let blob = new Blob([content]);
+	let url = window.URL.createObjectURL(blob);
+
+	a.href = url;
+	a.download = filename;
+	a.click();
+	window.URL.revokeObjectURL(url);
+}
 function downloadFile2(fileName, content) {
 	var aLink = document.createElement('a');
-	var blob = new Blob([content]);
-	var evt = document.createEvent("HTMLEvents");
-	evt.initEvent("click", false, false);//initEvent 不加后两个参数在FF下会报错, 感谢 Barret Lee 的反馈
+	if (!(content instanceof Blob)) {
+		content = new Blob([content]);
+	}
 	aLink.download = fileName;
-	aLink.href = URL.createObjectURL(blob);
-	aLink.dispatchEvent(evt);
+	aLink.href = URL.createObjectURL(content);
+	aLink.click()
+	// var evt = document.createEvent("HTMLEvents");
+	// evt.initEvent("click", false, false);//initEvent 不加后两个参数在FF下会报错, 感谢 Barret Lee 的反馈
+	// aLink.dispatchEvent(evt);
+	setTimeout(() => { URL.revokeObjectURL(aLink.href) }, 1000);
 }
-
-
-
-
 // downloadExcel
 function doit(table, fn, type, dl) {
 	var elt = document.getElementById('works');
@@ -3975,288 +3704,198 @@ function doit(table, fn, type, dl) {
 		XLSX.writeFile(wb, fn || ('test.' + (type || 'xlsx')));
 }
 
-function smartMatch(source, sourceTargetArray) {
-	log(sourceTargetArray)
-	var ret = '';
-	var o = strDiff(source, sourceTargetArray[0]);
-	var d1 = o.diff1, d2 = o.diff2, len1 = d1.length, len2 = d2.length, d1Value, d2Value;
-	var regexp = /^[\x01-\xff]+$/;
-	if (len1 === len2) {// 不同点个数一样
-		var startResult = [];
-		startResult.push('⁉ Replace');
-		ret = sourceTargetArray[1];
-		for (var i = 0; i < len1; i++) {
-			d1Value = d2Value = '';
-			if (regexp.test(d1[i])) {
-				ret = ret.replace(d2[i], d1[i]);
-				startResult.push(d2[i] + ' -> ' + d1[i]);
-			} else {
-				dict.array.some(function (e) {
-					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
-						if (e[0].trim() === d1[i].trim()) d1Value = e[1].trim();
-						if (e[0].trim() === d2[i].trim()) d2Value = e[1].trim();
-						if (d1Value && d2Value) return true;
-					}
-				});
-				if (d2Value) {
-					ret = ret.replace(d2Value, d1Value || d1[i]);
-					if (d1Value) {
-						startResult.push(d2Value + ' -> ' + d1Value);
-					} else {
-						startResult.push(d2Value + ' *> ' + d1[i]);
-					}
-				} else {
-					if (d1Value) {
-						startResult.push(d2[i] + ' *> ' + d1Value);
-					} else {
-						startResult.push(d2[i] + ' *> ' + d1[i]);
-					}
-				}
-			}
-		}
-		startResult.push('[Use] ' + sourceTargetArray[1]);
-		pushlog.apply(null, startResult);
-	} else if (len1 == 0) {
-		// len2多，所以要删除多余的部分
-		var startResult = [];
-		startResult.push('⁉ Remove');
-		ret = sourceTargetArray[1];
-		for (var i = 0; i < len2; i++) {
-			d2Value = '';
-			if (regexp.test(d2[i])) {
-				ret = ret.replace(d2[i], '');
-			} else {
-				dict.array.some(function (e) {
-					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
-						if (e[0].trim() === d2[i].trim()) {
-							d2Value = e[1];
-							return true;
-						}
-					}
-				});
-				if (d2Value) {
-					ret = ret.replace(d2Value, '');
-					startResult.push('[x] ' + d2Value);
-				} else {
-					startResult.push('[*] ' + d2[i]);
-				}
-			}
-		}
-		startResult.push('[Use] ' + sourceTargetArray[1]);
-		pushlog.apply(null, startResult);
-	} else if (len2 == 0) {
-		// len1多，所以要找到内容，添加进去
-		var startResult = [];
-		ret = sourceTargetArray[1];
-		startResult.push('‼ Add');
-		for (var i = 0; i < len1; i++) {
-			d1Value = '';
-			if (regexp.test(d1[i])) {
-				startResult.push('[*]' + d1[i]);
-			} else {
-				dict.array.some(function (e) {
-					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
-						if (e[0].trim() === d1[i].trim()) {
-							d1Value = e[1];
-							return true;
-						}
-					}
-				});
-				if (d1Value) {
-					startResult.push('[*] ' + d1Value);
-				} else {
-					startResult.push('[*] ' + d1[i]);
-				}
-			}
-		}
-		startResult.push('[Use] ' + sourceTargetArray[1]);
-		pushlog.apply(null, startResult);
-	} else {
-		ret = sourceTargetArray[1];
-		var startResult = [];
-		startResult.push('❌ No smart');
-		startResult.push('[*]' + d1.join('|') + ' <- ' + d2.join('|'));
-		pushlog.apply(null, startResult);
-		// ❌💯‼️⁉️
-	}
-	return ret;
-}
+// function smartMatch(source, sourceTargetArray) {
+// 	warn('调用smartMath()')
+// 	var ret = '';
+// 	var o = strDiff(source, sourceTargetArray[0]);
+// 	var d1 = o.diff1, d2 = o.diff2, len1 = d1.length, len2 = d2.length, d1Value, d2Value;
+// 	var regexp = /^[\x01-\xff]+$/;
+// 	if (len1 === len2) {// 不同点个数一样
+// 		var startResult = [];
+// 		startResult.push('⁉ Replace');
+// 		ret = sourceTargetArray[1];
+// 		for (var i = 0; i < len1; i++) {
+// 			d1Value = d2Value = '';
+// 			if (regexp.test(d1[i])) {
+// 				ret = ret.replace(d2[i], d1[i]);
+// 				startResult.push(d2[i] + ' -> ' + d1[i]);
+// 			} else {
+// 				dict.array.some(function (e) {
+// 					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
+// 						if (e[0].trim() === d1[i].trim()) d1Value = e[1].trim();
+// 						if (e[0].trim() === d2[i].trim()) d2Value = e[1].trim();
+// 						if (d1Value && d2Value) return true;
+// 					}
+// 				});
+// 				if (d2Value) {
+// 					ret = ret.replace(d2Value, d1Value || d1[i]);
+// 					if (d1Value) {
+// 						startResult.push(d2Value + ' -> ' + d1Value);
+// 					} else {
+// 						startResult.push(d2Value + ' *> ' + d1[i]);
+// 					}
+// 				} else {
+// 					if (d1Value) {
+// 						startResult.push(d2[i] + ' *> ' + d1Value);
+// 					} else {
+// 						startResult.push(d2[i] + ' *> ' + d1[i]);
+// 					}
+// 				}
+// 			}
+// 		}
+// 		startResult.push('[Use] ' + sourceTargetArray[1]);
+// 		pushlog.apply(null, startResult);
+// 	} else if (len1 == 0) {
+// 		// len2多，所以要删除多余的部分
+// 		var startResult = [];
+// 		startResult.push('⁉ Remove');
+// 		ret = sourceTargetArray[1];
+// 		for (var i = 0; i < len2; i++) {
+// 			d2Value = '';
+// 			if (regexp.test(d2[i])) {
+// 				ret = ret.replace(d2[i], '');
+// 			} else {
+// 				dict.array.some(function (e) {
+// 					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
+// 						if (e[0].trim() === d2[i].trim()) {
+// 							d2Value = e[1];
+// 							return true;
+// 						}
+// 					}
+// 				});
+// 				if (d2Value) {
+// 					ret = ret.replace(d2Value, '');
+// 					startResult.push('[x] ' + d2Value);
+// 				} else {
+// 					startResult.push('[*] ' + d2[i]);
+// 				}
+// 			}
+// 		}
+// 		startResult.push('[Use] ' + sourceTargetArray[1]);
+// 		pushlog.apply(null, startResult);
+// 	} else if (len2 == 0) {
+// 		// len1多，所以要找到内容，添加进去
+// 		var startResult = [];
+// 		ret = sourceTargetArray[1];
+// 		startResult.push('‼ Add');
+// 		for (var i = 0; i < len1; i++) {
+// 			d1Value = '';
+// 			if (regexp.test(d1[i])) {
+// 				startResult.push('[*]' + d1[i]);
+// 			} else {
+// 				dict.array.some(function (e) {
+// 					if (e && (typeof e[0] === 'string') && e[0] && (typeof e[1] === 'string') && e[1]) {
+// 						if (e[0].trim() === d1[i].trim()) {
+// 							d1Value = e[1];
+// 							return true;
+// 						}
+// 					}
+// 				});
+// 				if (d1Value) {
+// 					startResult.push('[*] ' + d1Value);
+// 				} else {
+// 					startResult.push('[*] ' + d1[i]);
+// 				}
+// 			}
+// 		}
+// 		startResult.push('[Use] ' + sourceTargetArray[1]);
+// 		pushlog.apply(null, startResult);
+// 	} else {
+// 		ret = sourceTargetArray[1];
+// 		var startResult = [];
+// 		startResult.push('❌ No smart');
+// 		startResult.push('[*]' + d1.join('|') + ' <- ' + d2.join('|'));
+// 		pushlog.apply(null, startResult);
+// 		// ❌💯‼️⁉️
+// 		log({ ret, source, sourceTargetArray })
+// 	}
+// 	return ret;
+// }
 
-function strDiff(str1, str2, separator) {
-	str1 = str1 || "";
-	str2 = str2 || "";
-	// separator = separator || /\b|[\s,\.\!_\-\+]+|\{\\r\\n\}|\\n/;// 原来的
-	separator = separator || /[\s,\.\!_\-\+]+|\{\\r\\n\}|\\n/;
-	// arr中有ele元素
-	function hasElement(arr, ele) {
-		// 内存循环
-		var hasItem1 = false;
-		for (var i2 = 0; i2 < arr.length; i2++) {
-			//
-			var item2 = arr[i2] || "";
-			if (!item2) {
-				continue;
-			}
-			//
-			if (ele == item2) {
-				hasItem1 = true;
-				break;
-			}
-		}
-		return hasItem1;
-	};
-	function inAnotB(a, b) { // 在A中，不在B中
-		var res = [];
-		for (var i1 = 0; i1 < a.length; i1++) {
-			var item1 = a[i1] || "";
-			if (!item1) {
-				continue;
-			}
-			var hasItem1 = hasElement(b, item1);
-			if (!hasItem1) {
-				res.push(item1);
-			}
-		}
-		return res;
-	};
-	//
-	var list1 = str1.split(separator);
-	var list2 = str2.split(separator);
-	//
-	var diff1 = inAnotB(list1, list2);
-	var diff2 = inAnotB(list2, list1);
-	// 返回结果
-	var result = {
-		diff1: diff1,
-		diff2: diff2,
-		separator: separator
-	};
-	return result;
-};
+// function strDiff(str1, str2, separator) {
+// 	str1 = str1 || "";
+// 	str2 = str2 || "";
+// 	// separator = separator || /\b|[\s,\.\!_\-\+]+|\{\\r\\n\}|\\n/;// 原来的
+// 	separator = separator || /[\s,\.\!_\-\+]+|\{\\r\\n\}|\\n/;
+// 	// arr中有ele元素
+// 	function hasElement(arr, ele) {
+// 		// 内存循环
+// 		var hasItem1 = false;
+// 		for (var i2 = 0; i2 < arr.length; i2++) {
+// 			//
+// 			var item2 = arr[i2] || "";
+// 			if (!item2) {
+// 				continue;
+// 			}
+// 			//
+// 			if (ele == item2) {
+// 				hasItem1 = true;
+// 				break;
+// 			}
+// 		}
+// 		return hasItem1;
+// 	};
+// 	function inAnotB(a, b) { // 在A中，不在B中
+// 		var res = [];
+// 		for (var i1 = 0; i1 < a.length; i1++) {
+// 			var item1 = a[i1] || "";
+// 			if (!item1) {
+// 				continue;
+// 			}
+// 			var hasItem1 = hasElement(b, item1);
+// 			if (!hasItem1) {
+// 				res.push(item1);
+// 			}
+// 		}
+// 		return res;
+// 	};
+// 	//
+// 	var list1 = str1.split(separator);
+// 	var list2 = str2.split(separator);
+// 	//
+// 	var diff1 = inAnotB(list1, list2);
+// 	var diff2 = inAnotB(list2, list1);
+// 	// 返回结果
+// 	var result = {
+// 		diff1: diff1,
+// 		diff2: diff2,
+// 		separator: separator
+// 	};
+// 	return result;
+// };
 
 
-// 查找表情符号用
+// 【查找表情符号用】
 function imo(begin, count) { while (count-- > 0) console.log(String.fromCharCode(55357, begin++)); }
-
-
-// var password='a';
-// if(ao.ls.get('licensePassword')!==password){
-// 	var licensePassword=prompt('Input your license Password!');
-// 	if(licensePassword===password) {
-// 		ao.ls.set('licensePassword',licensePassword);
-// 		// document.write('You do not have permission');
-// 	}else{
-// 		alert('You do not have permission. '+licensePassword);
-// 		location.href=location.href;
-// 	}
-// }
-
-
-
-// $(document).on('keydown','#tempResult',function(e){
-// 	if(e.keyCode===27){
-// 		hideTempResult();
-// 	}
-// })
-// function showTempResult(text){
-// 	$('#tempResult').text(text).height(window.innerHeight).removeClass('hide').trigger('select');
-// 	document.execCommand('copy',true);
-// 	hideTempResult();
-// }
-// function hideTempResult(){
-// 	$('#tempResult').addClass('hide').text('');
-// }
+// 【将数据复制到textarea上后复制到剪贴板中】
 function copyToTempResult(data) {
-	let ta = $('#tempResult').get(0)
-	ta.value = data
-	ta.select()
+	let ta = $('#tempResult').get(0);
+	ta.value = data;
+	ta.select();
 	document.execCommand('copy', true);
-	var length = data.length;
-	pushlog('Copyed', length > 50 ? (data.slice(0, 50) + '...(' + length + ')') : data);
-}
-
-function downloadFileUcs2(filename, content) {
-	content = content.replace(/\n/g, '\r\n');
-	content = punycode.ucs2.decode(content);
-	content.unshift(0xfeff);
-	content = Uint16Array.from(content);
-	var a = document.createElement('a');
-	var blob = new Blob([content]);
-	var url = window.URL.createObjectURL(blob);
-	// filename = filename + formatName(location.search) + '_' + Date.now() + '.txt';
-	filename = filename;
-
-	a.href = url;
-	a.download = filename;
-	a.click();
-	window.URL.revokeObjectURL(url);
-}
-
-
-{
-	try {
-		let t
-		let p = $('<div id="blocks">').appendTo('body').css({
-			position: 'fixed',
-			width: '100vw',
-			overflow: 'hidden',
-			left: 0, bottom: 0,
-			opacity: 0.9,
-		})
-		$(document).delegate('focus', '.target', (e) => {
-			log(123)
-			setTimeout(() => {
-				p.empty()
-				let _t = $('.currentEditRow').get(0);
-				if (_t === t) return;
-				console.log(t)
-
-				// let blocks = $('#works .no').clone().appendTo(p)
-
-				// let ohter = blocks.not('.curre')
-
-				// .eq($('.currentEditRow').index()).css({
-				// 	background: '#ff0',
-				// 	color: '#f00',
-				// }).get(0).scrollIntoView({
-				// 	// behavior: "smooth",
-				// 	block: "center",
-				// 	inline: "center",
-				// })
-			})
-		})
-
-
-
-	} catch (err) {
-		console.error(err)
-	}
-}
-
-
-function worksprogress() {
-	$('#works tr')
+	let length = data.length;
+	pushlog('[복사완료]', length > 50 ? (data.slice(0, 50) + '...(' + length + ')') : data);
 }
 
 
 
-
-
-
-// 记录最后的source和target的内容
-$(document).on('mouseup', '.source, .target', function (e) {
-	let { log } = console
+// 【记录最后一次在source或target中选择的文字内容】
+$(document).on('mouseup', '.source, .target', async function (e) {
+	// log(e.originalEvent.target, e.originalEvent.path)
+	// log(e.type);
 	let s = window.getSelection();// 选择文字
 	if (s.type !== 'Range' || s.anchorNode !== s.focusNode) {
 		return;
 	}
-	let p = s.anchorNode, isSource, isTarget, text;
-	while (p = p.parentNode) {
+	let p = s.anchorNode, isSource, isWorksSource, isTarget, text;
+	while (p = p.parentElement) {
 		isSource = p.classList.contains('source')
 		isTarget = p.classList.contains('target')
 		if (p.nodeType === Element.ELEMENT_NODE && p.classList && (isSource || isTarget)) {
 			text = s.toString()
 			if (isSource) {
+				isWorksSource = $(p).is('#works .source')
+				if (!isWorksSource) return;
 				$('#lsst').text(text)
 
 				// 기타 웹페이지 참조
@@ -4285,6 +3924,8 @@ $(document).on('mouseup', '.source, .target', function (e) {
 					$(tr).prepend($('<td class="no"></td>').text(i + 1));
 				});
 				$('#statusDict').html(table.innerHTML).prop('scrollTop', 0);
+
+				// 
 			} else if (isTarget) {
 				$('#ltst').text(text)
 			}
@@ -4292,50 +3933,54 @@ $(document).on('mouseup', '.source, .target', function (e) {
 		}
 	}
 	return;
-
-	let t = $(e.target);
-	if (t.is('.source')) {
-		lastSourceSelectionText = s.toString().trim();
-		$('#lsst').text(lastSourceSelectionText);
-
-		// 查找词典内容
-		// if($('#useDictTip').prop('checked') && lastSourceSelectionText){
-		if (lastSourceSelectionText) {
-			// 기타 웹페이지 참조
-			let g = $('#useNet').prop('checked');
-			if (g) {
-				if (lastSourceSelectionText && lastSourceSelectionText.trim()) {
-					gSearch(lastSourceSelectionText, $('#netTarget').val());
-				}
-			}
-
-			// 选词搜索规则
-			// 1）source !== target
-			// 2）带有数值的排到下方
-			var a = dict.search(lastSourceSelectionText, Number($('#similarPercent').val()));
-			a = a.filter(e => e[0] !== e[1]);
-			a.sort(function (a, b) {
-				if (/\d/.test(a)) return 1;
-			});
-			// 提示内容
-			var table = ao.arrayToTable(a);
-			$('td:nth-child(4)', table).addClass('index');
-			$('td:nth-child(3)', table).addClass('similar').each((_, e) => e.textContent = parseInt(e.textContent) + '%');
-			$('td:nth-child(2)', table).attr({ 'contenteditable': 'plaintext-only' }).addClass('target');
-			$('td:nth-child(1)', table).attr({ 'contenteditable': 'plaintext-only' }).addClass('source');
-			$('tr', table).each(function (i, tr) {
-				$(tr).prepend($('<td class="no"></td>').text(i + 1));
-			});
-			$('#statusDict').html(table.innerHTML).prop('scrollTop', 0);
-		}
-
-	} else if (t.is('.target')) {
-		lastTargetSelectionText = window.getSelection().toString().trim();
-		$('#ltst').text(lastTargetSelectionText);
-	}
 });
 
 
+// 【计算当前文档任务状态】
+let calculationWorksStatusTimeout = null
+let worksStatus = document.querySelector('#worksStatus')
+function calculationWorksStatus() {
+	clearTimeout(calculationWorksStatusTimeout)
+	calculationWorksStatusTimeout = setTimeout(() => {
+		let totalLength = 0
+		let doneLength = 0
+		let undoneLength = 0
+		let works = document.querySelector('#works')
+		let targets = works.querySelectorAll('.target')
+		let doneSegmentLength = 0
+		targets.forEach((target) => {
+			let isDone = /\bdone/.test(target.className)
+			let source = target.previousElementSibling
+			let sourceLength = source.textContent.length
+			// log(isDone, source, target)
+			totalLength += sourceLength
+			if (isDone) {
+				doneLength += sourceLength
+				doneSegmentLength += 1
+			} else {
+				undoneLength += sourceLength
+			}
+		})
+		// let workProgress = document.querySelector('#workProgress')
+		// workProgress.max = totalLength
+		// workProgress.value = doneLength
+
+
+		if (worksStatus) worksStatus.textContent = `${doneLength}/${totalLength}`
+
+
+		let progressDone = Math.floor(100 * doneLength / totalLength)
+		let progressDoneSegment = Math.floor(100 * doneSegmentLength / targets.length)
+		document.querySelector('#worksStatus')
+			.style.backgroundImage = `linear-gradient(0deg, #c0ffc0 ${progressDone}%, transparent 0),linear-gradient(90deg, #c8ebff ${progressDoneSegment}%, transparent 0),linear-gradient(0deg, #fffe 100%, transparent 0)`
+		// log(progressDone, progressDoneSegment)
+	}, 200)
+}
+// 【解锁F1键填充前锁住的格子】
+function clearWait() {
+	$('#works .target').removeClass('wait')
+}
+// 【清空任务中的译文】
 function clearTarget() {
 	$('#works .target').each((i, e) => {
 		// clear class.
@@ -4350,34 +3995,12 @@ function clearTarget() {
 }
 
 
-// 计算当前文档任务状态
-function clacWorksStatus() {
-	let totalSourceLength = 0, totalTargetLength = 0, totalSourceLengthDiff = 0;
 
-	$('#works tr').each((i, e) => {
-		let sourceLength = $(e).find('.source').text().length
-		let targetLength = $(e).find('.target').text().length
-
-		totalSourceLength += sourceLength
-		totalTargetLength += targetLength
-		if (targetLength === 0) totalSourceLengthDiff += sourceLength
-	})
-
-	pushlog(`${totalSourceLengthDiff} 남음(총${totalSourceLength})`)
-}
-
-function clearWait() {
-	$('#works .target').removeClass('wait')
-}
-
-
-
-
-$(function(){
-	$('#pinkthema').on('click',function(){
+$(function () {
+	$('#pinkthema').on('click', function () {
 		let { checked } = document.getElementById('pinkthema')
 		let tag
-		if(checked) {
+		if (checked) {
 			tag = document.body.appendChild(document.createElement('style'))
 			tag.setAttribute('id', 'pinkthematag')
 			tag.innerText = `
@@ -4464,14 +4087,18 @@ h3 {
 	text-align: center;
 	color: #ffffff;
 	background: #ffbad1;
-}`
-		}else{
+}
+.target {
+	font-family: Meiryo;
+}
+`
+		} else {
 			tag = document.getElementById('pinkthematag')
-			if(tag) tag.remove()
+			if (tag) tag.remove()
 		}
-		let tm = localforage.createInstance({name:'tm'})
+		let tm = localforage.createInstance({ name: 'tm' })
 		tm.setItem('pinkthema', $('#pinkthema').prop('checked'));
-		
+
 	})
 })
 
@@ -4480,24 +4107,29 @@ h3 {
 function gSearch(s, t) {
 	s = encodeURIComponent(s);
 
+	let screenX = parseInt($('#useNetWinLeft').val())
+	let screenY = parseInt($('#useNetWinTop').val())
+	let width = parseInt($('#useNetWinWidth').val())
+	let height = parseInt($('#useNetWinHeight').val())
+
 	if (!gSearch.google || gSearch.google.closed)
-		gSearch.google = wopen(`about:blank`, { name:'google', width: 400, height: 500, screenX:0, screenY:0 });
+		gSearch.google = wopen(`about:blank`, { name: 'google', width, height, screenX, screenY: screenY });
 
 	if (!gSearch.papago || gSearch.papago.closed)
-		gSearch.papago = wopen(`about:blank`, { name: 'papago', width: 400, height: 500, screenX: 0, screenY: 500 });
+		gSearch.papago = wopen(`about:blank`, { name: 'papago', width, height, screenX, screenY: screenY + height });
 	if (t === 'jp' || t === 'ja') {
 		t = 'ja';
 	}
 
 	if (!gSearch.googleAll || gSearch.googleAll.closed)
-		gSearch.googleAll = wopen(`about:blank`, { name: 'googleAll', width: 400, height: 500, screenX: 0, screenY: 1000 });
+		gSearch.googleAll = wopen(`about:blank`, { name: 'googleAll', width, height, screenX, screenY: screenY + 2 * height });
 
 	gSearch.google.location.href = `https://translate.google.cn/?view=home&op=translate&sl=auto&tl=${t}&text=${s}`;
 	gSearch.papago.location.href = `https://papago.naver.com/?sk=auto&tk=${t}&st=${s}`;
 	gSearch.googleAll.location.href = `https://www.google.com/search?q=${s}`;
 }
 window.addEventListener('beforeunload', (e) => {
-	function fn(name){
+	function fn(name) {
 		if (gSearch[name] && (typeof gSearch[name].close === 'function') && (!gSearch[name].closed)) gSearch[name].close()
 	}
 	fn('google')
@@ -4506,17 +4138,988 @@ window.addEventListener('beforeunload', (e) => {
 });// 关闭外部搜索窗口
 
 
-$(function(){
+$(function () {
 	themaReady[0] = true
 	showBody()
 })
 
-function showBody(){
-	if(themaReady.every(e=>e)) {
+function showBody() {
+	if (themaReady.every(e => e)) {
 		document.body.removeAttribute('style')
 	}
 }
 
-function hideDone(){
-	$('.done,.doneAuto').parent().toggle('.hide')
+function hideDone() {
+	$('.done, .doneAuto, .doneAutoSpace, .doneAutoNumber, .doneSmart').parent().addClass('hide')
 }
+function showAll() {
+	$('#works tr').removeClass('hide hide2 hide3').removeAttr('style')
+}
+
+// 测试一个节点是否有父级target
+function parentNodeIsTargetClasses(o) {
+	let p, b = false
+	while (p = o.parentNode) {
+		if (p.classList.contains('target')) {
+			b = true
+			break;
+		}
+	}
+	return b
+}
+
+
+function showDiff(target, source, tips) {
+
+	if (t.length) {
+		let t1 = $(tipName).find('tr').eq(key).find('.source').text().trim();
+		let t2 = $(e.target).parent().find('.source').text().trim();
+		let dmp = new diff_match_patch();
+		let diff = dmp.diff_main(t1, t2)
+		dmp.diff_cleanupSemantic(diff)
+		let dmpHTML = dmp.diff_prettyHtml(diff);
+		pushloghtml(dmpHTML);
+
+		let { x, y, height } = tar.get(0).getBoundingClientRect();
+		// showTip({html:dmpHTML, x, y:Math.max(y-height,0)});
+		showTip({ html: dmpHTML, x, y, delay: 5000, css: { transform: 'translate(0,-100%)' } });
+	}
+}
+
+
+
+// 排序
+function readySort(className = '.source', method = 'text', asc = 1) {
+	let s = $('#works tr')
+
+	$('#works tbody[dataname] tr').sort((a, b) => {
+		let at, bt
+		at = $(a).find(className).text()
+		bt = $(b).find(className).text()
+		if (method === 'length') {// length已经是数值
+			at = at.length
+			bt = bt.length
+		}
+		if (className === '.no') {// 由于no是数值，所以需要转化为数值后，在进行比较
+			at = parseInt(at)
+			bt = parseInt(bt)
+		}
+		// 如果是文本，则直接进行比较
+		return at > bt ? asc : (at < bt ? - asc : 0);
+	}).each((i, e) => {
+		let target = $(e)
+		let parent = target.parent().get(0)
+		target.detach().appendTo(parent)
+	})
+}
+
+$('#noAsc').on('click', (e) => readySort('.no', 'text', 1))
+$('#sourceAsc').on('click', (e) => readySort('.source', 'text', 1))
+$('#sourceDesc').on('click', (e) => readySort('.source', 'text', -1))
+$('#sourceLengthAsc').on('click', (e) => readySort('.source', 'length', 1))
+$('#sourceLengthDesc').on('click', (e) => readySort('.source', 'length', -1))
+
+
+
+function readFile(file, callback) {
+	let result = []
+	let reader = new FileReader()
+	let start = 0
+	let total = file.size
+	let { batch, onabort, onerror, onload, onloadstart, onloadend, onprogress, methodName } = readFile.options
+	let callbackType = typeof callback
+	if (callbackType === 'function') {
+		onload = callback
+	} else if (callbackType === 'object' && callback !== null) {
+		if (typeof callback.onabort === 'function') onabort = callback.onabort
+		if (typeof callback.onerror === 'function') onerror = callback.onerror
+		if (typeof callback.onload === 'function') onload = callback.onload
+		if (typeof callback.onloadstart === 'function') onloadstart = callback.onloadstart
+		if (typeof callback.onloadend === 'function') onloadend = callback.onloadend
+		if (typeof callback.onprogress === 'function') onprogress = callback.onprogress
+	}
+
+	reader.onabort = onabort
+	reader.onerror = onerror
+	reader.onloadstart = onloadstart
+	reader.onloadstart = onloadstart
+	reader.onloadend = onloadend
+	reader.onprogress = onprogress
+	reader.onload = function (event) {
+		try {
+			result.push(event.target.result)
+			asyncUpdate()
+		} catch (e) {
+			log(e)
+		}
+	};
+	let asyncUpdate = function () {
+		if (start < total) {
+			log((start / total * 100).toFixed(2) + '%')
+			let end = Math.min(start + batch, total)
+			// reader.readAsArrayBuffer(file.slice(start, end))
+			reader[methodName](file.slice(start, end))
+			start = end
+		} else {
+			onload(result)
+		}
+	};
+	asyncUpdate()
+	return reader
+}
+readFile.options = {
+	batch: 1024 * 1024 * 2,
+	onabort: console.warn,
+	onerror: console.error,
+	onload: console.log,
+	onloadstart: console.log,
+	onloadend: console.log,
+	onprogress: console.log,
+	methodName: 'readAsText',
+}
+
+
+// 在works中，source和target对换位置。
+$('#changeSourceAndTarget').on('click', () => {
+	$('#works tr').each((i, tr) => {
+		let source = $(tr).find('.source')
+		let target = $(tr).find('.target')
+		let cache = target.text()
+		target.text(source.text())
+		source.text(cache)
+	})
+})
+
+
+
+
+
+
+
+// 【粘贴到source和target时，处理下换行内容】
+// 针对粘贴的文本，替换换行和制表符。
+window.addEventListener('paste', function (e) {
+	let { clipboardData, target, target: { nodeType } } = event
+	// clipboardData.setData('text/plain', clipboardData.getData('text/plain').replace(/\r\n|\n/g,'\\n'))
+	// log(clipboardData.getData('text/plain'))
+	if (nodeType === 3) {
+		// 如果是Text
+		target = target.parentElement
+		nodeType = target.nodeType
+	}
+	if (nodeType === 1) {
+		// 如果是Element，且.target或.source
+		let { classList } = target
+		if (classList.contains('target') || classList.contains('source')) {
+			if (/\r\n|\n|\t/.test(clipboardData.getData('text/plain'))) {
+				console.warn('粘贴了带有换行符或制表符的内容')
+				if (getComputedStyle(target).webkitUserModify.indexOf('write') > -1) {
+					setTimeout(() => {
+						target.textContent = target.textContent.replace(/\r\n|\n/g, '\\n').replace(/\t/g, ' ')
+					}, 60);
+				}
+			}
+			// let { startContainer, endContainer } = SM.range
+			// if (startContainer === endContainer) {
+			// 	event.preventDefault()
+			// 	let text = clipboardData.getData('text/plain').replace(/\r\n|\n/g, '\\n').replace(/\t/g, ' ')
+			// 	SM.text = text
+			// }
+		}
+	} else {
+		error(nodeType, target)
+	}
+})
+
+
+
+
+
+
+// 选取行
+let lastSelectedNoElement// 记录最后一个选中的no元素
+let isMousedownAddSelectedStatByNo = false// 是否需要添加selected状态标记。是时添加；否时移除。
+$(document).on('mousedown', onmousedownHandleByNo)
+$(document).on('mouseup', onmouseupHandleByNo)
+$(document).on('mouseup', function (e) { isMousedownAddSelectedStatByNo = false })
+
+function onmousedownHandleByNo(e) {
+	let { target } = e
+	if (!(target && target.nodeType === 1 && target.classList.contains('no'))) return;
+	e.preventDefault()
+	if (e.which === 1) {
+		if (e.shiftKey) {// 用SHIFT组合键进行多重选择或移除。
+			if (!lastSelectedNoElement) return;// 不存在
+			if (!lastSelectedNoElement.isConnected) return;// 被DOM移除
+			if (lastSelectedNoElement.parentElement.style.display === 'none') return;// 不可见
+			if (e.target === lastSelectedNoElement) return;// 相同
+
+			let startNoValue = parseInt(lastSelectedNoElement.textContent)
+			let endNoValue = parseInt(e.target.textContent)
+			let startNo, endNo;// 排在上面的no元素，排在下面的no元素
+			if (startNoValue > endNoValue) {
+				startNo = e.target
+				endNo = lastSelectedNoElement
+			} else {
+				startNo = lastSelectedNoElement
+				endNo = e.target
+			}
+			startNoValue = parseInt(startNo.textContent)
+			endNoValue = parseInt(endNo.textContent)
+			let tr = startNo.parentElement
+			let isStartNoSelected = lastSelectedNoElement.classList.contains('selected')// 开始No的状态
+			let count = 0
+			do {
+				if (tr.isConnected && !(tr.classList.contains('hide') || tr.classList.contains('hide2') || tr.style.display === 'none')) {
+					// let $no = $(tr).find('td.no')
+					// let noValue = parseInt($no.text())
+					// if (noValue > endNoValue) break;
+					// $no[isStartNoSelected ? 'addClass' : 'removeClass']('selected')// 根据开始No的状态，确定添加/移除。
+					// log($no, isStartNoSelected)
+					let no = tr.querySelector('.no')
+					let noValue = parseInt(no.textContent)
+					if (noValue > endNoValue) break;
+					no.classList[isStartNoSelected ? 'add' : 'remove']('selected')// 根据开始No的状态，确定添加/移除。
+					// log(no, isStartNoSelected, tr)
+					count++
+				}
+			} while (tr = tr.nextElementSibling)
+			pushlog(`selected ${count}.`)
+		} else {
+			lastSelectedNoElement = e.target
+
+			isMousedownAddSelectedStatByNo = !e.target.classList.contains('selected')
+			e.target.classList[isMousedownAddSelectedStatByNo ? 'add' : 'remove']('selected')
+
+			// $(document).on('mouseover', '#works .no', onmouseoverHandleByNo)
+			document.addEventListener('mouseover', onmouseoverHandleByNo)
+		}
+	}
+}
+
+function onmouseupHandleByNo(e) {
+	// let { target } = e
+	// if(target && target.nodeType && target.classList.contains('no')) {
+	// 	isMousedownAddSelectedStatByNo = false
+	// 	document.removeEventListener('mouseover', onmouseoverHandleByNo)
+	// }
+	isMousedownAddSelectedStatByNo = false
+	document.removeEventListener('mouseover', onmouseoverHandleByNo)
+}
+
+function onmouseoverHandleByNo(e) {
+	e.preventDefault()
+	let { target } = e
+	if (target && target.nodeType === 1) {
+		let { classList } = target
+		if (classList.contains('source') || classList.contains('target')) {
+			target = target.parentElement.querySelector('.no')
+			if (target) target.classList[isMousedownAddSelectedStatByNo ? 'add' : 'remove']('selected')
+		}
+		if (classList.contains('no')) {
+			target.classList[isMousedownAddSelectedStatByNo ? 'add' : 'remove']('selected')
+		}
+	}
+}
+
+// 删除行
+$(document).on('contextmenu', '#works td.no', function (e) {
+	e.preventDefault();
+	removeSelectedHandle(e)
+});
+
+// 删除表
+$(document).on('contextmenu', '#works tbody', function (e) {
+	e.preventDefault()
+	let range = $(e.target)
+	log(range)
+
+	if (range.is('#works tbody')) {
+		if ((e.ctrlKey && e.shiftKey && e.altKey) || confirm('[삭제] ' + range.attr('dataname') + '를 삭제합니다! 확인해 주세요.')) {
+			range.remove()
+		}
+	}
+})
+
+
+function toUTC(dateStr) {
+	let o = {
+		$: dateStr ? new Date(dateStr) : new Date(),
+		get Y() { return this.$.getUTCFullYear().toString().padStart(2, '0') },
+		get m() { return (this.$.getUTCMonth() + 1).toString().padStart(2, '0') },
+		get d() { return this.$.getUTCDate().toString().padStart(2, '0') },
+		get H() { return this.$.getUTCHours().toString().padStart(2, '0') },
+		get i() { return this.$.getUTCMinutes().toString().padStart(2, '0') },
+		get s() { return this.$.getUTCSeconds().toString().padStart(2, '0') },
+	}
+
+	let { Y, m, d, H, i, s } = o
+	return `${Y}.${m}.${d} ${H}:${i}`
+}
+
+function ftime(format = 'Y/m/d H:i:s.ms', date = new Date(), utc = false) {
+	let rs
+	if (typeof format === 'string') {
+		rs = format.replace(/\b[A-Za-z]+\b/g, (m) => {
+			switch (m) {
+				case 'Y': return date[`get${utc ? 'UTC' : ''}FullYear`]().toString().padStart(4, '0')
+				case 'm': return (date[`get${utc ? 'UTC' : ''}Month`]() + 1).toString().padStart(2, '0')
+				case 'd': return date[`get${utc ? 'UTC' : ''}Date`]().toString().padStart(2, '0')
+				case 'H': return date[`get${utc ? 'UTC' : ''}Hours`]().toString().padStart(2, '0')
+				case 'i': return date[`get${utc ? 'UTC' : ''}Minutes`]().toString().padStart(2, '0')
+				case 's': return date[`get${utc ? 'UTC' : ''}Seconds`]().toString().padStart(2, '0')
+				case 'ms': return date[`get${utc ? 'UTC' : ''}Milliseconds`]().toString().padStart(3, '0')
+				default: return m
+			}
+		})
+	} else {
+		rs = date.toLocaleString()
+	}
+	return rs
+}
+
+// 只有GNSS项目才有的侦听。
+// 检测并转换提示UTC时间。
+if(/\?gnss\b/.test(location.search)) {
+	$(document).on('focus', '#works .target', (e) => {
+		let $target = $(e.target)
+		let $tr = $target.parent()
+		let $source = $tr.find('.source')
+		let sourceText = $source.text()
+		let datetimeRegExp = /(?<Y>\d{4})\s*(\.|\-|\/)\s*(?<m>\d{1,2})\s*\2\s*(?<d>\d{1,2})\s*(?<H>\d{1,2})\s*:\s*(?<i>\d{1,2})/
+		let matchs
+		if (matchs = datetimeRegExp.exec(sourceText)) {
+			if (matchs.groups) {
+				let { Y, m, d, H, i } = matchs.groups
+				let date = new Date(Y, parseInt(m) - 1, d, H, i)
+				let utc = ftime('Y.m.d H:i', date, true)
+	
+				let rect = $target.get(0).getBoundingClientRect()
+	
+				let v = `${utc}`
+	
+				if ($target.text().indexOf(v) === -1) {
+					v = '[UTC] ' + v
+					showTip({
+						text: v,
+						x: rect.x + rect.width,
+						y: rect.y,
+					})
+					pushlog(v)
+				}
+			}
+		}
+	})
+}
+
+
+$(document).on('blur', '#works .target', (e) => {
+	clearDoneMarks(e.target)
+})
+
+
+
+// 业务逻辑。当失去焦点，如果target没有内容，则清除done类标记。
+function clearDoneMarks(target) {
+	if (target.textContent.length === 0) {
+		target.classList.forEach((className) => {
+			if (/^done/.test(className)) {
+				target.classList.remove(className)
+			}
+		})
+	}
+}
+
+
+// Number QA 核心算法 --start
+function numberQA(s, t) {
+	/* 
+	<input type="number">
+	试图给它赋值字符串时，提示不符合正则表达式 /-?(\d+|\d+\.\d+|\.\d+)([eE][-+]?\d+)?/
+	*/
+
+
+	// 改良过的数值匹配
+	let myNumberRegExp = ArgText.numberRegExp
+	// 其他全部数值
+	let number = /\p{Number}/ug
+	// 合并数值匹配规则
+	let regExp = [myNumberRegExp, number]
+	regExp = new RegExp(regExp.map(re => re.source).join('|'), 'gu')
+	// 测试
+	// log('①Ⅰ一1１ 50%  1,000. .5% 90％ 1.001e1000'.match(regExp))
+
+
+	let r = regExp
+	s = s.match(r) || [];
+	t = t.match(r) || [];
+	return arrayDiff(s, t);
+}
+function arrayDiff(a, b) {
+	let __a = a.map(e => e.replace(/,/g, ''))
+	let __b = b.map(e => e.replace(/,/g, ''))
+	let _a = []
+	let _b = []
+
+	a.forEach((e, i) => {
+		if (b.indexOf(e) === -1 && __b.indexOf(e) === -1) {
+			_a.push({ value: e, index: i });
+		}
+	});
+	b.forEach((e, i) => {
+		if (a.indexOf(e) === -1 && __a.indexOf) {
+			_b.push({ value: e, index: i });
+		}
+	});
+
+	let ok = true, _al = _a.length, _bl = _b.length;
+	if (_al === _bl) {
+		if (a.join('\x02') !== b.join('\x02')) {
+			ok = false;
+		}
+	} else {
+		ok = false;
+	}
+	return { arr1: a, arr2: b, diff1: _a, diff2: _b, ok };
+}
+// Number QA 核心算法 --start
+
+function numberQACur() {
+	let cer = $('.currentEditRow')
+	let source = cer.find('.source')
+	let target = cer.find('.target')
+
+	let rs = numberQA(source.text(), target.text())
+	log(rs)
+}
+
+
+// 消除#works中.no的选中状态
+$('.util.work th.no').click((e) => {
+	$('#works .no.selected').removeClass('selected')
+})
+
+
+$('#mergeSelected').click((e) => {
+	$('#works .no.selected').each((i, e) => {
+		if (e.isConnected) {
+			let p = $(e).parent()
+
+			let pn
+			while (true) {
+				pn = p.next()
+				if (pn.length) {
+					let en = pn.find('.no.selected')
+					if (en.length) {
+						let es = p.find('.source'), et = p.find('.target')// 当前行
+						let ns = pn.find('.source'), nt = pn.find('.target')// 下一行
+
+						es.text(es.text() + '\\n' + ns.text())
+						et.text(et.text() + '\\n' + nt.text())
+						pn.remove()
+					} else {
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+		}
+	}).removeClass('selected')
+})
+
+
+function emptyFunction() { }
+
+$('#saveSelected').click(saveSelectedHandle)
+$('#removeSelected').click(removeSelectedHandle)
+
+function saveSelectedHandle() {
+	// if(confirm('선택된 행들을 번역기록에 저장하시겠습니까?')) {
+	let b = false
+	let nArr = []
+	let $selected = $('#works td.no.selected')
+	if ($selected.length === 0) return b;
+
+	$selected.each((i, e) => {
+		let n = $(e)
+		let p = n.parent()
+		let s = p.find('td.source')
+		let t = p.find('td.target')
+		let st = s.text().trim()
+		let tt = t.text().trim()
+		if (st && tt) {
+			dict.array.push([st, tt])
+			nArr.push(n.text())
+			t.addClass('done')
+		}
+	}).removeClass('selected')
+
+	b = Boolean(nArr.length)
+	if (b) pushlog('기록한 선택행: ' + nArr.join())
+	return b
+}
+
+function removeSelectedHandle(e) {
+	let range = $('#works td.no.selected')
+	if (range.length) {
+		if ((e.ctrlKey && e.shiftKey && e.altKey) || confirm('아래 내용을 삭제하시겠습니까?\n' + range.toArray().map((e) => e.textContent).join())) {
+			range.parent().remove()
+		}
+	}
+}
+
+// 统一管理按键
+// document.on('keydown', (e)=>{
+// 	let oe = e.originalEvent;
+// 	keydownaction(e,oe)
+// })
+// function keydownaction(e,oe) {
+
+// }
+
+
+let numRE = ArgText.numberRegExp
+function numCheck(s, t) {
+	// let s='1,001291 asfas  0.12  100,1000,00.0'
+	// let t='asfas  0.12  100,1000,00.0  1,00129'
+
+	let sa = s.match(numRE)
+	let ta = t.match(numRE)
+
+	// console.log(sa);
+	// console.log(ta);
+
+	function clac(sa, ta) {
+		sa = sa || [];
+		ta = ta || [];
+		let r = {}
+		if (sa.length === ta.length) {
+			if (sa.join('\u200c') === ta.join('\u2000c')) {
+				r.done = true;
+				return r;
+			} else {
+				r.done = false;
+			}
+		}
+		sa.forEach((e, i) => {
+			let index = ta.indexOf(e);
+			if (index !== -1) {
+				delete ta[index];
+				delete sa[i];
+			}
+		});
+		sa = sa.filter(e => e !== undefined);
+		ta = ta.filter(e => e !== undefined);
+		return { sa, ta }
+	}
+
+	// console.log(clac(sa,ta))
+	return clac(sa, ta);
+}
+
+
+function getSTWords() {
+	let RE = /\s+/g
+	let _dict = []
+	for (let i = 0, len = dict.array.length; i < len; i++) {
+		let [s, t] = dict.array[i]
+		s = s.replace(RE, '')
+		if (s.length < 10) {
+			t = t.replace(RE, '')
+			_dict.push([s, t])
+		}
+	}
+	return _dict
+}
+
+function wordCheck(s, t, dict) {
+	let RE = /\s+/g
+	let ret = []
+	s = s.replace(RE, '')
+	t = t.replace(RE, '')
+
+	dict.some(([ds, dt]) => {
+		if (s.indexOf(ds) !== -1) {
+			if (s === ds) {
+				ret.length = 0
+				return true
+			}
+			if (t.indexOf(dt) === -1) {
+				ret.push([ds, dt])
+			} else {
+				ret = ret.filter((rs, rt) => rs !== ds)
+			}
+		}
+	})
+
+	return ret.length === 0 ? (ret.done = true, ret) : ret;
+}
+
+
+$(document).on('keydown', '#lsst, #ltst', (e) => {
+	if (e.keyCode === 13) {
+		e.preventDefault()
+		if (e.altKey) {
+			SM.insert('\\n')
+		}
+		if (e.ctrlKey) {
+			$(document).trigger({ type: 'keydown', keyCode: 81, ctrlKey: true })
+		}
+	}
+})
+
+
+let tipIndex, tipTargetText
+$(document).on('keydown', '#works .target', (e) => {
+	let { ctrlKey, keyCode, altKey } = e
+	if (keyCode === 38 || keyCode === 40) {
+		if (ctrlKey) {
+			e.preventDefault()
+
+			if (typeof tipIndex !== 'number') tipIndex = -1
+
+			// 10个可选项目, 索引可以是 -10 ~ 9
+			if (keyCode === 38) tipIndex = (tipIndex - 1) % $('#tips .target').length
+			else if (keyCode === 40) tipIndex = (tipIndex + 1) % $('#tips .target').length
+			let tip = $('#tips').find('.target').eq(tipIndex)
+			tipTargetText = tip.text()
+
+			$('#tips .active').removeClass('active')
+			tip.addClass('active')
+			tip.parent().addClass('active')
+			tip.prop('scrollIntoView', { block: 'center' })
+		} else if (altKey) {
+			e.preventDefault()
+			if (typeof tipIndex !== 'number') tipIndex = -1
+
+			// 10个可选项目, 索引可以是 -10 ~ 9
+			if (keyCode === 38) tipIndex = (tipIndex - 1) % $('#statusDict .target').length
+			else if (keyCode === 40) tipIndex = (tipIndex + 1) % $('#statusDict .target').length
+			let tip = $('#statusDict').find('.target').eq(tipIndex)
+			tipTargetText = tip.text()
+
+			$('#statusDict .active').removeClass('active')
+			tip.addClass('active')
+			tip.parent().addClass('active')
+			tip.get(0).scrollIntoView({ block: 'center' })
+		}
+	}
+})
+$(document).on('keyup', '#works .target', (e) => {
+
+	let { originalEvent } = e
+	let { keyCode, ctrlKey, shiftKey, altKey, repeat } = originalEvent
+	if ((keyCode === 17 || keyCode === 18) && tipTargetText !== undefined) {
+		SM.set(tipTargetText)
+		tipTargetText = undefined
+		tipIndex = undefined
+		$('#tips .active, #statusDict .active').removeClass('active')
+	}
+})
+
+
+// 鼠标右键，删除
+$(document).on('contextmenu', '#tips td.no, #statusDict td.no', function (e) {
+	e.preventDefault();
+	let tar = $(e.target);
+	let p, n, s, t, i;
+	p = tar.parent('tr')
+	n = p.find('td.no').text()
+	s = p.find('td.source').text()
+	t = p.find('td.target').text()
+	i = parseInt(p.find('td.index').text())
+
+	if (!Array.isArray(dict.array[i])) return pushlog('사전에 없는 행입니다.')
+
+	if ((s !== dict.array[i][0]) && (t !== dict.array[i][1])) return pushlog('사전 위치 내용과 일치하지 않아 삭제하지 못했습니다!')
+
+	if ((e.shiftKey && e.ctrlKey && e.altKey) || confirm(`정말로 삭제하시겠습니까?
+No: - ${n} -
+source: ${s}
+target: ${t}
+index: - ${i} -`)) {
+		let item = dict.array.splice(i, 1);
+
+		$('#tips tr, #statusDict tr').each((_, tr) => {
+			let $index = $(tr).find('td.index')
+			let index = parseInt($index.text())
+			if (i === index) {
+				tr.remove()// 相同时删除
+			} else if (i < index) {
+				$index.text(index - 1)
+			}
+		})
+
+		console.info(`[삭제] ${i} ${item.join('\n')}`)
+		pushlog(`[삭제] ${i} ${item.join('\n')}`)
+	}
+});
+
+
+// console command
+function removeTips() {
+	let ret = []
+	$('#statusDict tr').remove()
+	$('#tips tr')
+		.sort((a, b) => parseInt($(b).find('.index').text()) - parseInt($(a).find('.index').text()))
+		.each((i, tr) => {
+			let $tr = $(tr)
+			let index = parseInt($tr.find('.index').text())
+			let source = $tr.find('.source').text()
+			let target = $tr.find('.target').text()
+
+			if (!Array.isArray(dict.array[index])) return log('사전에 없는 행입니다', index, dict.array.length)
+			if ((source !== dict.array[index][0]) && (target !== dict.array[index][1])) return log('사전 위치 내용과 일치하지 않아 삭제하지 못했습니다!')
+
+			let item = dict.array.splice(index, 1)
+			ret.push(source + '\t' + target)
+		})
+	log(ret.join('\n'))
+}
+function uniqueWorks() {
+	$('#works').find('tbody').each((i, tbody) => {
+		let uniqueSet = new Set()
+		$(tbody).find('tr').each((i, tr) => {
+			let $tr = $(tr)
+			let source = $tr.find('td.source').text()
+			if (uniqueSet.has(source)) tr.remove()
+			else uniqueSet.add(source)
+		})
+	})
+}
+
+
+$('#uniqueWorksBtn').on('click', uniqueWorks)
+
+
+// 删除隐藏行，删除空tbody
+$('#removeHides').on('click', (e) => {
+	$('#works').find('tr.hide, tr.hide1, tr.hide2').remove()
+	$('#works tbody:empty').remove()
+})
+
+
+/* 
+已知：（记忆文）
+蓝色忍者武器65(单刃)	희귀 닌자 무기65(외날검)
+紫色	영웅
+蓝色	희귀
+蓝莓	블루베리
+紫菜	김
+
+得出：（任务文）
+紫色游侠武器65(弓)	
+
+
+过程：
+dmp对比后得出“蓝”和“紫”不同。（但是词库中有“蓝色”和“紫色”，没有“蓝”和“紫”）
+任务文搜索“紫色”和“紫菜”，结果“紫色”被保留，“紫菜”被流放。
+记忆文搜索“蓝色”和“蓝莓”，结果“蓝色”被保留，“蓝莓”被流放。
+由于记忆候选和任务候选都只有一项，所以记忆文的译文需要替换。
+*/
+function smartMatchReplaceOfCase(source, dict) {
+
+}
+
+
+// 横版
+let chanheeMode = document.querySelector('#chanheeMode')
+chanheeMode.disabled = true
+if (chanheeMode) {
+	if (localStorage.getItem('chanheeMode')) {
+		let e = document.querySelector('#chanheeMode')
+		if (e) e.disabled = false
+	}
+}
+$('#chanheeModeSwitch').click((e) => {
+	let v = !e.target.checked
+	log(v)
+	chanheeMode.disabled = v
+})
+
+
+
+// 选中行插入工具
+let selectedctl = {
+	form: document.querySelector('#selectedctl'),
+	get pos() {
+		return this.form.elements.namedItem(' ').value
+	},
+	get text() {
+		return this.form.elements.namedItem('selectedText').value
+	},
+	get textType() {
+		return this.form.elements.namedItem('selectedTextType').value
+	},
+	get selecteds() {
+		let s = document.querySelectorAll('#works tr')
+		let ret = []
+		s.forEach((tr) => {
+			if (tr.querySelector('.selected')) {
+				if (!/\bhide/i.test(tr.className)) {
+					ret.push(tr)
+				}
+			}
+		})
+		return ret
+	}
+}
+document.querySelector('#selectedInsertButton')
+	.addEventListener('click', function (e) {
+		let { pos, text, textType, selecteds } = selectedctl
+		let len = selecteds.length
+		let regExp
+
+		if (len && text && textType && pos) {
+			if (textType === 'regexp') {
+				try {
+					regExp = new RegExp(text, 'gui')
+				} catch (err) {
+					return pushlog('정규식 오류!')
+				}
+			}
+			selecteds.forEach((tr) => {
+				let target = tr.querySelector('.target')
+				if (textType === 'regexp') {
+					let source = tr.querySelector('.source')
+					text = source.textContent.match(regExp)
+					if (text && Array.isArray(text) && text.length > 0) {
+						text = text.join('')
+					} else {
+						return;
+					}
+				}
+				if (pos === 'begin') {
+					target.insertAdjacentText('afterbegin', text)
+				} else {
+					target.insertAdjacentText('beforeend', text)
+				}
+			})
+		} else {
+			log('Insert deny!')
+		}
+	})
+
+async function downloadDicts() {
+	const RE = /_(?<pname>\w+)dict$/i
+	let time = ftime().replace(/\//g, '').replace(/:/g, '').replace(/ |\./g, '_')// 格式化的当前时间串
+	let filename = `tm4_dicts_${time}.xlsx`
+	let workbook = XLSX.utils.book_new();
+
+	let keys = await tm.keys()
+	for (let i = 0; i < keys.length; i++) {
+		let k = keys[i]
+		let m = k.match(RE)
+		if (m) {
+			const { groups: { pname } } = m// 焦点1：项目名——pname
+			try {
+				pname = decodeURI(pname.replace(/_/g, '%'))
+			} catch (err) {
+				console.debug(pname, '无法decodeURI')
+			}
+			let arr = await tm.getItem(k)// 焦点2：项目数据——arr
+			let sheet = XLSX.utils.aoa_to_sheet(arr);
+			try {
+				XLSX.utils.book_append_sheet(workbook, sheet, pname.substr(0, 31));
+			} catch (err) {
+				console.error(k, pname, err)
+				return;
+			}
+		}
+	}
+	// wopts = { bookType: 'xlsx', bookSST: false, type: 'array' };
+	// wbout = XLSX.write(workbook, wopts);
+	XLSX.writeFile(workbook, filename);
+}
+
+$('#downloadDictsXLS').click(downloadDicts)
+
+
+
+void function (undefined) {
+	let OnlineTimeName = oid + 'OnlineTime'
+	setInterval(() => {
+		let time = localStorage.getItem(OnlineTimeName) || 0
+		localStorage.setItem(OnlineTimeName, +time + 1)
+	}, 1000);
+	setInterval(() => {
+		pushlog(`online time is ${localStorage.getItem(OnlineTimeName) || 0}`)
+	}, 60000);
+}();
+
+Object.defineProperty(window, 'onlineTime', {
+	get(){
+		return localStorage.getItem(oid + 'OnlineTime');
+	}
+});
+
+
+// quick debug code
+Object.defineProperty(window, 'no', { get() { return document.querySelector('#works .currentEditRow .no') } })
+Object.defineProperty(window, 'source', { get() { return document.querySelector('#works .currentEditRow .source') } })
+Object.defineProperty(window, 'target', { get() { return document.querySelector('#works .currentEditRow .target') } })
+Object.defineProperty(window, 'statusDict', { get() { return $('#statusDict tr').toArray().map((e) => Array.from(e.querySelectorAll('.source,.target'), (e) => e.textContent)) } })
+
+
+
+function parseLocationSearch(dk, dv) {
+	// dk  空时默认键?=v(?dk=v)
+	// dv  空时默认值?k=(?k=dv)
+	let rs = {};
+	location.search.slice(1).split('&').forEach(function (e) {
+		if (e) {
+			let [k, v] = e.split('=');
+			let temp
+			k = k ? decodeURI(k) : dk
+			v = v ? decodeURI(v) : dv
+			try {
+				v = JSON.parse(v)
+			} catch (err) { }
+			rs[k] = v
+		}
+	});
+	return rs;
+}
+
+
+
+/* 
+背景图片
+*/
+// async function backgroundImage() {
+// 	let blob = await localforage.getItem('bgImage')
+// 	let draw = function(blob){
+// 		let url = URL.createObjectURL(blob)
+// 		url = `url(${url})`
+// 		log(url)
+// 		setTimeout(()=>{
+// 			let s = document.body.style
+// 			s.backgroundImage = url
+// 			// s.backgroundRepeat = 'no-repeat'
+// 			// s.backgroundSize = 'cover'
+// 			s.backgroundSize = 'contain'
+// 			// s.backgroundPosition = 'right bottom'
+// 			s.backgroundPosition = 'left'
+// 			s.minHeight = '100vh'
+// 		},1000)
+// 	}
+// 	if(!blob) {
+// 		let res = await fetch('bg.jpg')
+// 		blob = await res.blob()
+// 		await localforage.setItem('bgImage', blob)
+// 	}
+// 	draw(blob)
+// }
+
+// document.addEventListener('DOMContentLoaded', backgroundImage)
+// window.addEventListener('blur', (e)=>{
+// 	document.body.style.backgroundBlendMode = 'luminosity'
+// 	document.body.style.filter = 'grayscale(1)'
+// })
+// window.addEventListener('focus', (e)=>{
+// 	document.body.style.backgroundBlendMode = ''
+// 	document.body.style.filter = ''
+// })
+
+
