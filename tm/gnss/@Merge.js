@@ -7,7 +7,7 @@ function stringToArray(t,n=0){
 }
 
 // 读取目录下的txt文件
-var dirname = './ZHO/';
+var dirname = './source/';
 var filenames = fs.readdirSync(dirname);
 
 filenames =filenames.filter(function(filename){
@@ -43,8 +43,11 @@ filenames.forEach(function (filename,index){
 // console.log(results);
 
 
-fs.writeFileSync('merge.txt', results.map(e=>e.join('\t')).join('\n'), {encoding:'utf8'});
+fs.writeFileSync('./result/merge.txt', results.map(e=>e.join('\t')).join('\n'), {encoding:'utf8'});
 
-results=Array.from(new Set(results.map(e=>e.join('\0')))).map(e=>e.split('\0'));
+results=Array.from(new Set(results.map(e=>e.join('\0\0')))).map(e=>e.split('\0\0'));
 results.sort();
-fs.writeFileSync('mergeUnique.txt', results.map(e=>e.join('\t')).join('\n'), {encoding:'utf8'});
+fs.writeFileSync('./result/mergeUnique.txt', results.map(e=>e.join('\t')).join('\n'), {encoding:'utf8'});
+
+
+console.log('done')
